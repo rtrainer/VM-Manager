@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/VmManager.App/VmManager.App.csproj" />
+    <Project Path="src/VmManager.Core/VmManager.Core.csproj" />
+    <Project Path="src/VmManager.HyperV/VmManager.HyperV.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/VmManager.Core.Tests/VmManager.Core.Tests.csproj" />
+  </Folder>
+</Solution>
