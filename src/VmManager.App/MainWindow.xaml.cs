@@ -8,8 +8,6 @@ using System.Windows.Threading;
 using VmManager.Core.Models;
 using VmManager.Core.Services;
 
-using MessageBox = System.Windows.MessageBox;
-
 namespace VmManager.App;
 
 public partial class MainWindow : Window {
@@ -82,15 +80,15 @@ public partial class MainWindow : Window {
         }
 
         if (_settingsWindow is not null) {
+            ShowFromTray();
             _settingsWindow.Activate();
             return;
         }
 
+        ShowFromTray();
         _settingsWindow = new SettingsWindow(this);
         _settingsWindow.Closed += (_, _) => _settingsWindow = null;
-        if (IsVisible) {
-            _settingsWindow.Owner = this;
-        }
+        _settingsWindow.Owner = this;
 
         _settingsWindow.Show();
         _settingsWindow.Activate();
@@ -141,7 +139,12 @@ public partial class MainWindow : Window {
 
     private GroupOption? SelectedFilter => GroupFilterComboBox.SelectedItem as GroupOption;
 
-    private void RebuildGroupSelectors(Guid? selectedFilterId = null) {
+    private VmGroup? SelectedMembershipGroup =>
+        MembershipGroupComboBox.SelectedItem is VmGroup group
+            ? _groupCatalog.Groups.FirstOrDefault(candidate => candidate.Id == group.Id)
+            : null;
+
+    private void RebuildGroupSelectors(Guid? selectedFilterId = null, Guid? selectedMembershipGroupId = null) {
         IReadOnlyList<VmGroup> groups = _groupCatalog.Groups;
         var filterOptions = new List<GroupOption> { new(null, "All virtual machines") };
         filterOptions.AddRange(groups.Select(group => new GroupOption(group.Id, group.Name)));
@@ -150,10 +153,12 @@ public partial class MainWindow : Window {
         GroupFilterComboBox.SelectedItem = filterOptions.FirstOrDefault(option => option.Id == selectedFilterId)
             ?? filterOptions[0];
         MembershipGroupComboBox.ItemsSource = groups;
-        MembershipGroupComboBox.SelectedIndex = groups.Count > 0 ? 0 : -1;
+        MembershipGroupComboBox.SelectedItem = groups.FirstOrDefault(group => group.Id == selectedMembershipGroupId)
+            ?? groups.FirstOrDefault();
     }
 
     private void ApplyGroupFilter() {
+        Guid? selectedVmId = SelectedVm?.VirtualMachine.Id;
         Guid? selectedGroupId = SelectedFilter?.Id;
         IReadOnlyList<VirtualMachine> visibleVms = selectedGroupId is null
             ? _virtualMachines
@@ -169,6 +174,8 @@ public partial class MainWindow : Window {
                     .Where(group => group.VmIds.Contains(vm.Id))
                     .Select(group => group.Name))))
             .ToList();
+        VmGrid.SelectedItem = (VmGrid.ItemsSource as IReadOnlyList<VmListRow>)
+            ?.FirstOrDefault(row => row.VirtualMachine.Id == selectedVmId);
         UpdateActionButtons();
     }
 
@@ -185,7 +192,7 @@ public partial class MainWindow : Window {
             SetStatus("Operation completed.");
         } catch (Exception exception) {
             SetStatus($"Operation failed: {exception.Message}");
-            MessageBox.Show(exception.Message, "VM Manager", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageDialog.Show(this, exception.Message, "VM Manager", MessageBoxButton.OK, MessageBoxImage.Error);
         } finally {
             _operationInProgress = false;
             await RefreshAsync(silent: true);
@@ -209,9 +216,23 @@ public partial class MainWindow : Window {
     private void SetStatus(string message) => StatusTextBlock.Text = message.ReplaceLineEndings(" ");
 
     private void UpdateActionButtons() {
+        bool groupSelected = SelectedFilter?.Id is not null;
+        DeleteGroupButton.IsEnabled = groupSelected && !_operationInProgress;
+        StartGroupButton.IsEnabled = groupSelected && !_operationInProgress;
+        ShutDownGroupButton.IsEnabled = groupSelected && !_operationInProgress;
+
         StartVmButton.IsEnabled = SelectedVm?.VirtualMachine.CanStart == true && !_operationInProgress;
         ShutDownVmButton.IsEnabled = SelectedVm?.VirtualMachine.CanStop == true && !_operationInProgress;
         TurnOffVmButton.IsEnabled = SelectedVm?.VirtualMachine.CanStop == true && !_operationInProgress;
+        VmGroup? membershipGroup = SelectedMembershipGroup;
+        bool selectedVmIsGroupMember = SelectedVm is not null
+            && membershipGroup?.VmIds.Contains(SelectedVm.VirtualMachine.Id) == true;
+        AddToGroupButton.IsEnabled = membershipGroup is not null
+            && (SelectedVm is null || !selectedVmIsGroupMember)
+            && !_operationInProgress;
+        RemoveFromGroupButton.IsEnabled = SelectedVm is not null
+            && selectedVmIsGroupMember
+            && !_operationInProgress;
     }
 
     private async void RefreshButton_Click(object sender, RoutedEventArgs e) => await RefreshAsync();
@@ -220,11 +241,28 @@ public partial class MainWindow : Window {
 
     private void GroupFilterComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e) {
         if (VmGrid is not null) {
+            if (SelectedFilter?.Id is Guid groupId) {
+                SelectMembershipGroup(groupId);
+            }
+
             ApplyGroupFilter();
         }
     }
 
     private void VmGrid_SelectionChanged(object sender, SelectionChangedEventArgs e) => UpdateActionButtons();
+
+    private void MembershipGroupComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e) => UpdateActionButtons();
+
+    private void SelectMembershipGroup(Guid groupId) {
+        if (MembershipGroupComboBox.ItemsSource is not IEnumerable<VmGroup> groups) {
+            return;
+        }
+
+        VmGroup? group = groups.FirstOrDefault(candidate => candidate.Id == groupId);
+        if (group is not null) {
+            MembershipGroupComboBox.SelectedItem = group;
+        }
+    }
 
     private void VmGrid_PreviewMouseRightButtonDown(object sender, MouseButtonEventArgs e) {
         DataGridRow? row = FindVisualParent<DataGridRow>(e.OriginalSource as DependencyObject);
@@ -271,11 +309,11 @@ public partial class MainWindow : Window {
 
         try {
             VmGroup group = await _groupCatalog.CreateAsync(dialog.GroupName);
-            RebuildGroupSelectors(group.Id);
+            RebuildGroupSelectors(group.Id, group.Id);
             ApplyGroupFilter();
             DataChanged?.Invoke(this, EventArgs.Empty);
         } catch (Exception exception) {
-            MessageBox.Show(exception.Message, "VM Manager", MessageBoxButton.OK, MessageBoxImage.Warning);
+            MessageDialog.Show(this, exception.Message, "VM Manager", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
     }
 
@@ -284,8 +322,9 @@ public partial class MainWindow : Window {
             return;
         }
 
-        if (MessageBox.Show("Delete the selected group? Virtual machines will not be deleted.",
-                "VM Manager", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) {
+        string groupName = SelectedFilter.Name;
+        if (MessageDialog.Show(this, $"Delete group '{groupName}'? Virtual machines will not be deleted.",
+                "Delete group", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) {
             return;
         }
 
@@ -296,22 +335,79 @@ public partial class MainWindow : Window {
     }
 
     private async void AddToGroupButton_Click(object sender, RoutedEventArgs e) {
-        if (SelectedVm is null || MembershipGroupComboBox.SelectedItem is not VmGroup group) {
+        if (MembershipGroupComboBox.SelectedItem is not VmGroup group) {
+            SetStatus("Create or select a group before adding a virtual machine.");
             return;
         }
 
-        await _groupCatalog.AddVmAsync(group.Id, SelectedVm.VirtualMachine.Id);
+        VmListRow? selectedVm = SelectedVm;
+        if (selectedVm is null) {
+            await AddSelectedVmsToGroupAsync(group);
+            return;
+        }
+
+        VmGroup currentGroup = _groupCatalog.Groups.First(candidate => candidate.Id == group.Id);
+        bool alreadyInGroup = currentGroup.VmIds.Contains(selectedVm.VirtualMachine.Id);
+        if (alreadyInGroup) {
+            SetStatus($"{selectedVm.Name} is already in {currentGroup.Name}.");
+            return;
+        }
+
+        await _groupCatalog.AddVmAsync(group.Id, selectedVm.VirtualMachine.Id);
+        RebuildGroupSelectors(SelectedFilter?.Id, group.Id);
         ApplyGroupFilter();
+        SetStatus($"Added {selectedVm.Name} to {currentGroup.Name}.");
+        DataChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    private async Task AddSelectedVmsToGroupAsync(VmGroup group) {
+        VmGroup currentGroup = _groupCatalog.Groups.First(candidate => candidate.Id == group.Id);
+        IReadOnlyList<VirtualMachine> availableVms = _virtualMachines
+            .Where(vm => !currentGroup.VmIds.Contains(vm.Id))
+            .OrderBy(vm => vm.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (availableVms.Count == 0) {
+            SetStatus($"All virtual machines are already in {currentGroup.Name}.");
+            return;
+        }
+
+        var dialog = new VmSelectionDialog(currentGroup.Name, availableVms) { Owner = this };
+        if (dialog.ShowDialog() != true) {
+            return;
+        }
+
+        IReadOnlyList<VirtualMachine> selectedVms = dialog.SelectedVirtualMachines;
+        foreach (VirtualMachine vm in selectedVms) {
+            await _groupCatalog.AddVmAsync(currentGroup.Id, vm.Id);
+        }
+
+        RebuildGroupSelectors(SelectedFilter?.Id, currentGroup.Id);
+        ApplyGroupFilter();
+        SetStatus($"Added {selectedVms.Count} virtual machine(s) to {currentGroup.Name}.");
         DataChanged?.Invoke(this, EventArgs.Empty);
     }
 
     private async void RemoveFromGroupButton_Click(object sender, RoutedEventArgs e) {
-        if (SelectedVm is null || MembershipGroupComboBox.SelectedItem is not VmGroup group) {
+        VmListRow? selectedVm = SelectedVm;
+        if (selectedVm is null) {
+            SetStatus("Select a virtual machine before removing it from a group.");
             return;
         }
 
-        await _groupCatalog.RemoveVmAsync(group.Id, SelectedVm.VirtualMachine.Id);
+        if (MembershipGroupComboBox.SelectedItem is not VmGroup group) {
+            SetStatus("Create or select a group before removing a virtual machine.");
+            return;
+        }
+
+        VmGroup currentGroup = _groupCatalog.Groups.First(candidate => candidate.Id == group.Id);
+        bool wasInGroup = currentGroup.VmIds.Contains(selectedVm.VirtualMachine.Id);
+        await _groupCatalog.RemoveVmAsync(group.Id, selectedVm.VirtualMachine.Id);
+        RebuildGroupSelectors(SelectedFilter?.Id, group.Id);
         ApplyGroupFilter();
+        SetStatus(wasInGroup
+            ? $"Removed {selectedVm.Name} from {group.Name}."
+            : $"{selectedVm.Name} is not in {group.Name}.");
         DataChanged?.Invoke(this, EventArgs.Empty);
     }
 

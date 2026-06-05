@@ -47,6 +47,23 @@ public sealed class TrayIconService : IDisposable {
         menu.Items.Add("Settings...", null, (_, _) => _mainWindow.ShowSettings());
         menu.Items.Add(new Forms.ToolStripSeparator());
 
+        foreach (VmGroup group in _mainWindow.Groups) {
+            var groupItem = new Forms.ToolStripMenuItem(group.Name);
+            groupItem.DropDownItems.Add("Start group", null, async (_, _) => await _mainWindow.StartGroupAsync(group.Id));
+            groupItem.DropDownItems.Add("Shut down group", null, async (_, _) => await _mainWindow.ShutDownGroupAsync(group.Id));
+            groupItem.DropDownItems.Add(new Forms.ToolStripSeparator());
+
+            foreach (VirtualMachine vm in _mainWindow.VirtualMachines.Where(vm => group.VmIds.Contains(vm.Id))) {
+                groupItem.DropDownItems.Add(CreateVmItem(vm));
+            }
+
+            menu.Items.Add(groupItem);
+        }
+
+        if (_mainWindow.Groups.Count > 0) {
+            menu.Items.Add(new Forms.ToolStripSeparator());
+        }
+
         foreach (VirtualMachine vm in _mainWindow.VirtualMachines) {
             menu.Items.Add(CreateVmItem(vm));
         }

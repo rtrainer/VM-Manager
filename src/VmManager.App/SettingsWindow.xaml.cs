@@ -1,8 +1,6 @@
 using System.Reflection;
 using System.Windows;
 
-using MessageBox = System.Windows.MessageBox;
-
 namespace VmManager.App;
 
 public partial class SettingsWindow : Window {
@@ -16,6 +14,10 @@ public partial class SettingsWindow : Window {
         VersionTextBlock.Text = $"Version {GetApplicationVersion()}";
     }
 
+    private void Window_Loaded(object sender, RoutedEventArgs e) {
+        DialogPlacement.CenterOverOwner(this);
+    }
+
     private async void StartMinimizedToggle_Click(object sender, RoutedEventArgs e) {
         if (_saving) {
             return;
@@ -27,7 +29,7 @@ public partial class SettingsWindow : Window {
             await _mainWindow.SetStartMinimizedAsync(StartMinimizedToggle.IsChecked == true);
         } catch (Exception exception) {
             StartMinimizedToggle.IsChecked = _mainWindow.StartMinimized;
-            MessageBox.Show(exception.Message, "Unable to save settings", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageDialog.Show(_mainWindow, exception.Message, "Unable to save settings", MessageBoxButton.OK, MessageBoxImage.Error);
         } finally {
             StartMinimizedToggle.IsEnabled = true;
             _saving = false;

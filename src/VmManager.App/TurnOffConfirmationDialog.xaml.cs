@@ -9,13 +9,7 @@ public partial class TurnOffConfirmationDialog : Window {
     }
 
     private void Window_Loaded(object sender, RoutedEventArgs e) {
-        if (Owner is null) {
-            WindowStartupLocation = WindowStartupLocation.CenterScreen;
-            return;
-        }
-
-        Left = Owner.Left + ((Owner.ActualWidth - ActualWidth) / 2);
-        Top = Owner.Top + ((Owner.ActualHeight - ActualHeight) / 2);
+        DialogPlacement.CenterOverOwner(this);
     }
 
     private void TurnOffButton_Click(object sender, RoutedEventArgs e) {

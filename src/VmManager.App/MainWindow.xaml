@@ -20,7 +20,7 @@
             </Grid.ColumnDefinitions>
             <StackPanel Grid.Column="0">
                 <TextBlock Text="Local Hyper-V Virtual Machines" FontSize="22" FontWeight="SemiBold" />
-                <TextBlock Text="Manage the state of local Hyper-V virtual machines."
+                <TextBlock Text="Manage VM state and organize machines into custom groups."
                            Foreground="#666666" Margin="0,3,0,0" />
             </StackPanel>
             <StackPanel Grid.Column="1" Orientation="Horizontal"
@@ -35,7 +35,7 @@
             </StackPanel>
         </Grid>
 
-        <Grid Grid.Row="1" Margin="0,0,0,12" Visibility="Collapsed">
+        <Grid Grid.Row="1" Margin="0,0,0,12">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="220" />
@@ -52,15 +52,15 @@
             <Button Grid.Column="2" Content="New group" Height="32" Margin="8,0,0,0" Padding="12,0"
                     VerticalContentAlignment="Center"
                     Click="NewGroupButton_Click" />
-            <Button Grid.Column="3" Content="Delete group" Height="32" Margin="8,0,0,0" Padding="12,0"
+            <Button x:Name="DeleteGroupButton" Grid.Column="3" Content="Delete group" Height="32" Margin="8,0,0,0" Padding="12,0"
                     VerticalContentAlignment="Center"
-                    Click="DeleteGroupButton_Click" />
-            <Button Grid.Column="5" Content="Start group" Height="32" Margin="8,0,0,0" Padding="12,0"
+                    IsEnabled="False" Click="DeleteGroupButton_Click" />
+            <Button x:Name="StartGroupButton" Grid.Column="5" Content="Start group" Height="32" Margin="8,0,0,0" Padding="12,0"
                     VerticalContentAlignment="Center"
-                    Click="StartGroupButton_Click" />
-            <Button Grid.Column="6" Content="Shut down group" Height="32" Margin="8,0,0,0" Padding="12,0"
+                    IsEnabled="False" Click="StartGroupButton_Click" />
+            <Button x:Name="ShutDownGroupButton" Grid.Column="6" Content="Shut down group" Height="32" Margin="8,0,0,0" Padding="12,0"
                     VerticalContentAlignment="Center"
-                    Click="ShutDownGroupButton_Click" />
+                    IsEnabled="False" Click="ShutDownGroupButton_Click" />
         </Grid>
 
         <DataGrid x:Name="VmGrid" Grid.Row="2" AutoGenerateColumns="False" IsReadOnly="True"
@@ -82,8 +82,7 @@
                 <DataGridTextColumn Header="State" Binding="{Binding State}" Width="120" />
                 <DataGridTextColumn Header="CPU" Binding="{Binding CpuDisplay}" Width="80" />
                 <DataGridTextColumn Header="Memory" Binding="{Binding MemoryDisplay}" Width="110" />
-                <DataGridTextColumn Header="Groups" Binding="{Binding GroupsDisplay}" Width="220"
-                                    Visibility="Collapsed" />
+                <DataGridTextColumn Header="Groups" Binding="{Binding GroupsDisplay}" Width="220" />
             </DataGrid.Columns>
         </DataGrid>
 
@@ -104,17 +103,16 @@
                     Margin="8,0,0,0" IsEnabled="False" Click="ShutDownVmButton_Click" />
             <Button x:Name="TurnOffVmButton" Grid.Column="2" Content="Turn off..." Width="90" Height="32"
                     Margin="8,0,0,0" IsEnabled="False" Click="TurnOffVmButton_Click" />
-            <TextBlock Grid.Column="4" Text="Group:" VerticalAlignment="Center" Margin="0,0,8,0"
-                       Visibility="Collapsed" />
+            <TextBlock Grid.Column="4" Text="Group:" VerticalAlignment="Center" Margin="0,0,8,0" />
             <ComboBox x:Name="MembershipGroupComboBox" Grid.Column="5" Height="32"
                       Padding="8,0" VerticalContentAlignment="Center" DisplayMemberPath="Name"
-                      Visibility="Collapsed" />
-            <Button Grid.Column="6" Content="Add" Height="32" Margin="8,0,0,0" Padding="12,0"
-                    VerticalContentAlignment="Center" Visibility="Collapsed"
-                    Click="AddToGroupButton_Click" />
-            <Button Grid.Column="7" Content="Remove" Height="32" Margin="8,0,0,0" Padding="12,0"
-                    VerticalContentAlignment="Center" Visibility="Collapsed"
-                    Click="RemoveFromGroupButton_Click" />
+                      SelectionChanged="MembershipGroupComboBox_SelectionChanged" />
+            <Button x:Name="AddToGroupButton" Grid.Column="6" Content="Add" Height="32" Margin="8,0,0,0" Padding="12,0"
+                    VerticalContentAlignment="Center"
+                    IsEnabled="False" Click="AddToGroupButton_Click" />
+            <Button x:Name="RemoveFromGroupButton" Grid.Column="7" Content="Remove" Height="32" Margin="8,0,0,0" Padding="12,0"
+                    VerticalContentAlignment="Center"
+                    IsEnabled="False" Click="RemoveFromGroupButton_Click" />
         </Grid>
 
         <Border Grid.Row="4" Background="#F1F3F5" Padding="10,7">

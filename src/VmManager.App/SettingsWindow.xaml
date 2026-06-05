@@ -5,8 +5,10 @@
         Icon="Assets/AppIcon.ico"
         Width="500" Height="270"
         MinWidth="460" MinHeight="250"
-        WindowStartupLocation="CenterOwner"
+        WindowStartupLocation="Manual"
         ResizeMode="NoResize"
+        ShowInTaskbar="False"
+        Loaded="Window_Loaded"
         Background="#FAF8FC">
     <Window.Resources>
         <Style x:Key="ToggleSwitchStyle" TargetType="CheckBox">

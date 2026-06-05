@@ -27,7 +27,7 @@ public partial class App : System.Windows.Application {
             _singleInstanceMutex = new Mutex(true, MutexName, out var isFirstInstance);
             _ownsSingleInstanceMutex = isFirstInstance;
             if (!isFirstInstance) {
-                MessageBox.Show("VM Manager is already running.", "VM Manager");
+                ShowMessage("VM Manager is already running.", "VM Manager");
                 Shutdown();
                 return;
             }
@@ -74,9 +74,9 @@ public partial class App : System.Windows.Application {
             }
         } catch (Exception exception) {
             AppLog.Write(exception);
+            ShowMessage(exception.Message, "VM Manager could not start", MessageBoxButton.OK, MessageBoxImage.Error);
             _splashWindow?.Close();
             _splashWindow = null;
-            MessageBox.Show(exception.Message, "VM Manager could not start", MessageBoxButton.OK, MessageBoxImage.Error);
             Shutdown();
         }
     }
@@ -94,5 +94,23 @@ public partial class App : System.Windows.Application {
         }
 
         base.OnExit(e);
+    }
+
+    private void ShowMessage(
+        string message,
+        string caption,
+        MessageBoxButton button = MessageBoxButton.OK,
+        MessageBoxImage image = MessageBoxImage.None) {
+        Window? owner = MainWindow?.IsVisible == true
+            ? MainWindow
+            : _splashWindow?.IsVisible == true
+                ? _splashWindow
+                : null;
+        if (owner is null) {
+            MessageBox.Show(message, caption, button, image);
+            return;
+        }
+
+        MessageDialog.Show(owner, message, caption, button, image);
     }
 }
