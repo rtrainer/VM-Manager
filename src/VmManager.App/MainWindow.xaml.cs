@@ -139,6 +139,11 @@ public partial class MainWindow : Window {
 
     private GroupOption? SelectedFilter => GroupFilterComboBox.SelectedItem as GroupOption;
 
+    private VmGroup? SelectedFilterGroup =>
+        SelectedFilter?.Id is Guid groupId
+            ? _groupCatalog.Groups.FirstOrDefault(group => group.Id == groupId)
+            : null;
+
     private VmGroup? SelectedMembershipGroup =>
         MembershipGroupComboBox.SelectedItem is VmGroup group
             ? _groupCatalog.Groups.FirstOrDefault(candidate => candidate.Id == group.Id)
@@ -216,10 +221,15 @@ public partial class MainWindow : Window {
     private void SetStatus(string message) => StatusTextBlock.Text = message.ReplaceLineEndings(" ");
 
     private void UpdateActionButtons() {
-        bool groupSelected = SelectedFilter?.Id is not null;
+        VmGroup? filterGroup = SelectedFilterGroup;
+        bool groupSelected = filterGroup is not null;
         DeleteGroupButton.IsEnabled = groupSelected && !_operationInProgress;
-        StartGroupButton.IsEnabled = groupSelected && !_operationInProgress;
-        ShutDownGroupButton.IsEnabled = groupSelected && !_operationInProgress;
+        StartGroupButton.IsEnabled = filterGroup is not null
+            && _virtualMachines.Any(vm => filterGroup.VmIds.Contains(vm.Id) && vm.CanStart)
+            && !_operationInProgress;
+        ShutDownGroupButton.IsEnabled = filterGroup is not null
+            && _virtualMachines.Any(vm => filterGroup.VmIds.Contains(vm.Id) && vm.CanStop)
+            && !_operationInProgress;
 
         StartVmButton.IsEnabled = SelectedVm?.VirtualMachine.CanStart == true && !_operationInProgress;
         ShutDownVmButton.IsEnabled = SelectedVm?.VirtualMachine.CanStop == true && !_operationInProgress;
