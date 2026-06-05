@@ -8,6 +8,8 @@ using System.Windows.Threading;
 using VmManager.Core.Models;
 using VmManager.Core.Services;
 
+using WpfMenuItem = System.Windows.Controls.MenuItem;
+
 namespace VmManager.App;
 
 public partial class MainWindow : Window {
@@ -294,6 +296,36 @@ public partial class MainWindow : Window {
         ContextStartVmMenuItem.IsEnabled = vm?.CanStart == true && !_operationInProgress;
         ContextShutDownVmMenuItem.IsEnabled = vm?.CanStop == true && !_operationInProgress;
         ContextTurnOffVmMenuItem.IsEnabled = vm?.CanStop == true && !_operationInProgress;
+        RebuildContextAddToGroupMenu(vm);
+    }
+
+    private void RebuildContextAddToGroupMenu(VirtualMachine? vm) {
+        ContextAddToGroupMenuItem.Items.Clear();
+        if (vm is null || _operationInProgress) {
+            ContextAddToGroupMenuItem.IsEnabled = false;
+            return;
+        }
+
+        IReadOnlyList<VmGroup> availableGroups = _groupCatalog.Groups
+            .Where(group => !group.VmIds.Contains(vm.Id))
+            .ToList();
+        ContextAddToGroupMenuItem.IsEnabled = availableGroups.Count > 0;
+
+        foreach (VmGroup group in availableGroups) {
+            var groupMenuItem = new WpfMenuItem {
+                Header = group.Name,
+                Tag = group.Id
+            };
+            groupMenuItem.Click += ContextAddToGroupMenuItem_Click;
+            ContextAddToGroupMenuItem.Items.Add(groupMenuItem);
+        }
+
+        if (availableGroups.Count == 0) {
+            ContextAddToGroupMenuItem.Items.Add(new WpfMenuItem {
+                Header = "No available groups",
+                IsEnabled = false
+            });
+        }
     }
 
     private async void ContextStartVmMenuItem_Click(object sender, RoutedEventArgs e) {
@@ -310,6 +342,20 @@ public partial class MainWindow : Window {
 
     private async void ContextTurnOffVmMenuItem_Click(object sender, RoutedEventArgs e) =>
         await TurnOffSelectedVmAsync();
+
+    private async void ContextAddToGroupMenuItem_Click(object sender, RoutedEventArgs e) {
+        VmListRow? selectedVm = SelectedVm;
+        if (selectedVm is null || sender is not WpfMenuItem { Tag: Guid groupId }) {
+            return;
+        }
+
+        VmGroup group = _groupCatalog.Groups.First(group => group.Id == groupId);
+        await _groupCatalog.AddVmAsync(groupId, selectedVm.VirtualMachine.Id);
+        RebuildGroupSelectors(SelectedFilter?.Id, groupId);
+        ApplyGroupFilter();
+        SetStatus($"Added {selectedVm.Name} to {group.Name}.");
+        DataChanged?.Invoke(this, EventArgs.Empty);
+    }
 
     private async void NewGroupButton_Click(object sender, RoutedEventArgs e) {
         var dialog = new GroupNameDialog { Owner = this };

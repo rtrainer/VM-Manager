@@ -75,6 +75,8 @@
                     <Separator />
                     <MenuItem x:Name="ContextTurnOffVmMenuItem" Header="Turn off..."
                               Click="ContextTurnOffVmMenuItem_Click" />
+                    <Separator />
+                    <MenuItem x:Name="ContextAddToGroupMenuItem" Header="Add to group" />
                 </ContextMenu>
             </DataGrid.ContextMenu>
             <DataGrid.Columns>
