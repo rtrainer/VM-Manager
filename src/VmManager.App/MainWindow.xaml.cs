@@ -1,9 +1,12 @@
 using System.ComponentModel;
+using System.Reflection;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
+
+using Velopack;
 
 using VmManager.Core.Models;
 using VmManager.Core.Services;
@@ -13,15 +16,21 @@ using WpfMenuItem = System.Windows.Controls.MenuItem;
 namespace VmManager.App;
 
 public partial class MainWindow : Window {
+    private static readonly TimeSpan UpdateCheckInterval = TimeSpan.FromHours(6);
     private readonly IHyperVService _hyperVService;
     private readonly VmGroupCatalog _groupCatalog;
     private readonly IAppSettingsRepository _settingsRepository;
     private readonly DispatcherTimer _refreshTimer;
+    private readonly DispatcherTimer _updateTimer;
     private AppSettings _settings;
     private IReadOnlyList<VirtualMachine> _virtualMachines = [];
+    private UpdateInfo? _availableUpdate;
+    private VelopackAsset? _readyUpdate;
+    private string? _lastNotifiedUpdateVersion;
     private SettingsWindow? _settingsWindow;
     private bool _allowClose;
     private bool _operationInProgress;
+    private bool _updateCheckInProgress;
 
     public MainWindow(
         IHyperVService hyperVService,
@@ -39,15 +48,29 @@ public partial class MainWindow : Window {
         _refreshTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(5) };
         _refreshTimer.Tick += async (_, _) => await RefreshAsync(silent: true);
         _refreshTimer.Start();
+
+        _updateTimer = new DispatcherTimer { Interval = UpdateCheckInterval };
+        _updateTimer.Tick += async (_, _) => await CheckForUpdatesAsync();
     }
 
     public event EventHandler? DataChanged;
+
+    public event EventHandler<UpdateAvailableEventArgs>? UpdateAvailable;
 
     public IReadOnlyList<VirtualMachine> VirtualMachines => _virtualMachines;
 
     public IReadOnlyList<VmGroup> Groups => _groupCatalog.Groups;
 
     public bool StartMinimized => _settings.StartMinimized;
+
+    public bool AutoUpdateEnabled => _settings.AutoUpdateEnabled;
+
+    public bool AutoUpdateAvailable => CreateUpdateManager() is not null;
+
+    public bool HasAvailableUpdate => _availableUpdate is not null || _readyUpdate is not null;
+
+    public string? AvailableUpdateVersion =>
+        _readyUpdate?.Version.ToString() ?? _availableUpdate?.TargetFullRelease.Version.ToString();
 
     public void ShowFromTray() {
         if (!Dispatcher.CheckAccess()) {
@@ -135,6 +158,132 @@ public partial class MainWindow : Window {
         AppSettings updatedSettings = _settings with { StartMinimized = startMinimized };
         await _settingsRepository.SaveAsync(updatedSettings);
         _settings = updatedSettings;
+    }
+
+    public async Task SetAutoUpdateEnabledAsync(bool autoUpdateEnabled) {
+        if (!AutoUpdateAvailable && autoUpdateEnabled) {
+            throw new InvalidOperationException("Automatic updates require an installed Velopack app and a configured update feed URL.");
+        }
+
+        if (_settings.AutoUpdateEnabled == autoUpdateEnabled) {
+            return;
+        }
+
+        AppSettings updatedSettings = _settings with { AutoUpdateEnabled = autoUpdateEnabled };
+        await _settingsRepository.SaveAsync(updatedSettings);
+        _settings = updatedSettings;
+
+        if (autoUpdateEnabled) {
+            StartBackgroundUpdateChecks(checkNow: true);
+        } else {
+            StopBackgroundUpdateChecks();
+        }
+    }
+
+    public void StartBackgroundUpdateChecks(bool checkNow) {
+        if (!_settings.AutoUpdateEnabled || !AutoUpdateAvailable) {
+            return;
+        }
+
+        if (!_updateTimer.IsEnabled) {
+            _updateTimer.Start();
+        }
+
+        if (checkNow) {
+            _ = CheckForUpdatesAsync();
+        }
+    }
+
+    public async Task CheckForUpdatesAsync(bool silent = true) {
+        if (!_settings.AutoUpdateEnabled || _updateCheckInProgress) {
+            return;
+        }
+
+        UpdateManager? updateManager = CreateUpdateManager();
+        if (updateManager is null) {
+            if (!silent) {
+                SetStatus("Automatic updates are not configured for this build.");
+            }
+
+            return;
+        }
+
+        _updateCheckInProgress = true;
+        try {
+            VelopackAsset? pendingUpdate = updateManager.UpdatePendingRestart;
+            if (pendingUpdate is not null) {
+                _readyUpdate = pendingUpdate;
+                NotifyUpdateAvailable(pendingUpdate.Version.ToString(), isReadyToInstall: true);
+                DataChanged?.Invoke(this, EventArgs.Empty);
+                return;
+            }
+
+            if (!silent) {
+                SetStatus("Checking for updates...");
+            }
+
+            UpdateInfo? update = await updateManager.CheckForUpdatesAsync();
+            if (update is null) {
+                _availableUpdate = null;
+                _readyUpdate = null;
+                _lastNotifiedUpdateVersion = null;
+                DataChanged?.Invoke(this, EventArgs.Empty);
+                if (!silent) {
+                    SetStatus("VM Manager is up to date.");
+                }
+
+                return;
+            }
+
+            _availableUpdate = update;
+            SetStatus($"Update {update.TargetFullRelease.Version} is available.");
+            NotifyUpdateAvailable(update.TargetFullRelease.Version.ToString(), isReadyToInstall: false);
+            DataChanged?.Invoke(this, EventArgs.Empty);
+        } catch (Exception exception) {
+            AppLog.Write(exception);
+            SetStatus($"Unable to check for updates: {exception.Message}");
+            if (!silent) {
+                MessageDialog.Show(IsVisible ? this : null, exception.Message, "Unable to check for updates", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        } finally {
+            _updateCheckInProgress = false;
+        }
+    }
+
+    public async Task InstallAvailableUpdateAsync() {
+        UpdateManager? updateManager = CreateUpdateManager();
+        if (updateManager is null) {
+            SetStatus("Automatic updates are not configured for this build.");
+            return;
+        }
+
+        try {
+            VelopackAsset? pendingUpdate = updateManager.UpdatePendingRestart;
+            if (pendingUpdate is not null) {
+                PromptToRestartForUpdate(updateManager, pendingUpdate);
+                return;
+            }
+
+            UpdateInfo? update = _availableUpdate ?? await updateManager.CheckForUpdatesAsync();
+            if (update is null) {
+                _availableUpdate = null;
+                DataChanged?.Invoke(this, EventArgs.Empty);
+                SetStatus("VM Manager is up to date.");
+                return;
+            }
+
+            SetStatus($"Downloading update {update.TargetFullRelease.Version}...");
+            await updateManager.DownloadUpdatesAsync(update, progress =>
+                Dispatcher.BeginInvoke(() => SetStatus($"Downloading update {update.TargetFullRelease.Version}... {progress}%")));
+            _availableUpdate = null;
+            _readyUpdate = update.TargetFullRelease;
+            DataChanged?.Invoke(this, EventArgs.Empty);
+            PromptToRestartForUpdate(updateManager, update.TargetFullRelease);
+        } catch (Exception exception) {
+            AppLog.Write(exception);
+            SetStatus($"Unable to install update: {exception.Message}");
+            MessageDialog.Show(IsVisible ? this : null, exception.Message, "Unable to install update", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
     }
 
     private VmListRow? SelectedVm => VmGrid.SelectedItem as VmListRow;
@@ -530,6 +679,53 @@ public partial class MainWindow : Window {
         return null;
     }
 
+    private static UpdateManager? CreateUpdateManager() {
+        string? feedUrl = GetConfiguredUpdateFeedUrl();
+        if (string.IsNullOrWhiteSpace(feedUrl)) {
+            return null;
+        }
+
+        try {
+            var updateManager = new UpdateManager(feedUrl);
+            return updateManager.IsInstalled ? updateManager : null;
+        } catch {
+            return null;
+        }
+    }
+
+    private static string? GetConfiguredUpdateFeedUrl() =>
+        typeof(App).Assembly.GetCustomAttributes<AssemblyMetadataAttribute>()
+            .FirstOrDefault(attribute => attribute.Key == "VelopackUpdateUrl")
+            ?.Value;
+
+    private void StopBackgroundUpdateChecks() {
+        _updateTimer.Stop();
+        _availableUpdate = null;
+        _readyUpdate = null;
+        _lastNotifiedUpdateVersion = null;
+        DataChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void NotifyUpdateAvailable(string version, bool isReadyToInstall) {
+        if (_lastNotifiedUpdateVersion == version) {
+            return;
+        }
+
+        _lastNotifiedUpdateVersion = version;
+        UpdateAvailable?.Invoke(this, new UpdateAvailableEventArgs(version, isReadyToInstall));
+    }
+
+    private void PromptToRestartForUpdate(UpdateManager updateManager, VelopackAsset update) {
+        SetStatus($"Update {update.Version} is ready to install.");
+        if (MessageDialog.Show(IsVisible ? this : null, $"Update {update.Version} is ready. Restart VM Manager now to install it?",
+                "Update ready", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) {
+            return;
+        }
+
+        _allowClose = true;
+        updateManager.ApplyUpdatesAndRestart(update);
+    }
+
     private sealed record GroupOption(Guid? Id, string Name);
 
     private sealed record VmListRow(VirtualMachine VirtualMachine, string GroupsDisplay) {
@@ -538,4 +734,10 @@ public partial class MainWindow : Window {
         public string CpuDisplay => $"{VirtualMachine.CpuUsage}%";
         public string MemoryDisplay => $"{VirtualMachine.MemoryAssignedBytes / 1024d / 1024d:N0} MB";
     }
+}
+
+public sealed class UpdateAvailableEventArgs(string version, bool isReadyToInstall) : EventArgs {
+    public string Version { get; } = version;
+
+    public bool IsReadyToInstall { get; } = isReadyToInstall;
 }

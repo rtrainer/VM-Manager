@@ -2,6 +2,8 @@ using System.Diagnostics;
 using System.Windows;
 using System.Windows.Threading;
 
+using Velopack;
+
 using VmManager.Core.Models;
 using VmManager.Core.Services;
 using VmManager.HyperV;
@@ -18,6 +20,15 @@ public partial class App : System.Windows.Application {
     private bool _ownsSingleInstanceMutex;
     private TrayIconService? _trayIcon;
     private SplashWindow? _splashWindow;
+
+    [STAThread]
+    private static void Main(string[] args) {
+        VelopackApp.Build().Run();
+
+        var app = new App();
+        app.InitializeComponent();
+        app.Run();
+    }
 
     protected override async void OnStartup(StartupEventArgs e) {
         base.OnStartup(e);
@@ -56,6 +67,8 @@ public partial class App : System.Windows.Application {
 
             _splashWindow.SetStatus("Discovering local Hyper-V virtual machines...");
             await mainWindow.RefreshAsync();
+
+            mainWindow.StartBackgroundUpdateChecks(checkNow: settings.AutoUpdateEnabled);
 
             TimeSpan remainingSplashTime = MinimumSplashDuration - splashStopwatch.Elapsed;
             if (remainingSplashTime > TimeSpan.Zero) {

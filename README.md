@@ -53,6 +53,22 @@ dotnet build .\VmManager.slnx
 dotnet test .\VmManager.slnx
 ```
 
+## Build installer
+
+VM Manager uses Velopack for Windows installer and release packaging:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\installer\build-installer.ps1
+```
+
+The script publishes a self-contained `win-x64` build and creates Velopack release assets in `artifacts\velopack`, including `LittleBitsSoftware.VmManager-win-Setup.exe`.
+
+Automatic updates are optional and disabled by default. When enabled, VM Manager checks in the background and shows a tray notification when an update is available. To make the settings toggle available in a packaged build, host the Velopack release files from `artifacts\velopack` and pass that feed URL when building:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\installer\build-installer.ps1 -UpdateUrl "https://example.com/vm-manager/releases"
+```
+
 ## Release version
 
 Update the `<Version>` property in `src\VmManager.App\VmManager.App.csproj` for each release build. The value is embedded into the application metadata and displayed at the bottom of the settings window.

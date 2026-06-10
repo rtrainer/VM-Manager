@@ -11,6 +11,8 @@ public partial class SettingsWindow : Window {
         _mainWindow = mainWindow;
         InitializeComponent();
         StartMinimizedToggle.IsChecked = mainWindow.StartMinimized;
+        AutoUpdateToggle.IsChecked = mainWindow.AutoUpdateEnabled;
+        ConfigureAutoUpdateToggle();
         VersionTextBlock.Text = $"Version {GetApplicationVersion()}";
     }
 
@@ -23,17 +25,48 @@ public partial class SettingsWindow : Window {
             return;
         }
 
+        await SaveSettingAsync(
+            StartMinimizedToggle,
+            () => _mainWindow.StartMinimized,
+            enabled => _mainWindow.SetStartMinimizedAsync(enabled));
+    }
+
+    private async void AutoUpdateToggle_Click(object sender, RoutedEventArgs e) {
+        if (_saving) {
+            return;
+        }
+
+        await SaveSettingAsync(
+            AutoUpdateToggle,
+            () => _mainWindow.AutoUpdateEnabled,
+            enabled => _mainWindow.SetAutoUpdateEnabledAsync(enabled));
+    }
+
+    private async Task SaveSettingAsync(
+        System.Windows.Controls.CheckBox toggle,
+        Func<bool> currentValue,
+        Func<bool, Task> save) {
         _saving = true;
-        StartMinimizedToggle.IsEnabled = false;
+        toggle.IsEnabled = false;
         try {
-            await _mainWindow.SetStartMinimizedAsync(StartMinimizedToggle.IsChecked == true);
+            await save(toggle.IsChecked == true);
         } catch (Exception exception) {
-            StartMinimizedToggle.IsChecked = _mainWindow.StartMinimized;
+            toggle.IsChecked = currentValue();
             MessageDialog.Show(_mainWindow, exception.Message, "Unable to save settings", MessageBoxButton.OK, MessageBoxImage.Error);
         } finally {
-            StartMinimizedToggle.IsEnabled = true;
+            toggle.IsEnabled = toggle != AutoUpdateToggle || _mainWindow.AutoUpdateAvailable;
             _saving = false;
         }
+    }
+
+    private void ConfigureAutoUpdateToggle() {
+        if (_mainWindow.AutoUpdateAvailable) {
+            return;
+        }
+
+        AutoUpdateToggle.IsEnabled = false;
+        AutoUpdateToggle.IsChecked = false;
+        AutoUpdateDescriptionTextBlock.Text = "Automatic updates require an installed Velopack app and a configured update feed URL.";
     }
 
     private static string GetApplicationVersion() {

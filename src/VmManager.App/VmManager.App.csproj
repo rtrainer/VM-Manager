@@ -5,10 +5,17 @@
     <ProjectReference Include="..\VmManager.HyperV\VmManager.HyperV.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <ApplicationDefinition Remove="App.xaml" />
+    <Page Include="App.xaml" />
+  </ItemGroup>
+
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0-windows</TargetFramework>
     <Version>0.2.2</Version>
+    <VelopackUpdateUrl Condition="'$(VelopackUpdateUrl)' == ''"></VelopackUpdateUrl>
+    <StartupObject>VmManager.App.App</StartupObject>
     <ApplicationIcon>Assets\AppIcon.ico</ApplicationIcon>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -19,6 +26,17 @@
   <ItemGroup>
     <Resource Include="Assets\AppIcon.ico" />
     <Resource Include="Assets\AppIcon.png" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Velopack" Version="1.2.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>VelopackUpdateUrl</_Parameter1>
+      <_Parameter2>$(VelopackUpdateUrl)</_Parameter2>
+    </AssemblyAttribute>
   </ItemGroup>
 
 </Project>

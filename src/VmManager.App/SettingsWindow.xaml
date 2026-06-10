@@ -3,8 +3,8 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="VM Manager Settings"
         Icon="Assets/AppIcon.ico"
-        Width="500" Height="270"
-        MinWidth="460" MinHeight="250"
+        Width="500" Height="340"
+        MinWidth="460" MinHeight="320"
         WindowStartupLocation="Manual"
         ResizeMode="NoResize"
         ShowInTaskbar="False"
@@ -59,9 +59,8 @@
             </StackPanel>
         </Border>
 
-        <Border Grid.Row="1" Margin="14,16,14,14" Padding="0,0,0,14"
-                BorderBrush="#E1DDE5" BorderThickness="0,0,0,1">
-            <Grid>
+        <StackPanel Grid.Row="1" Margin="14,16,14,14">
+            <Grid Margin="0,0,0,14">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="32" />
                     <ColumnDefinition Width="*" />
@@ -82,7 +81,34 @@
                           VerticalAlignment="Top" Margin="0,0,2,0"
                           Click="StartMinimizedToggle_Click" />
             </Grid>
-        </Border>
+
+            <Border BorderBrush="#E1DDE5" BorderThickness="0,1,0,0" Margin="0,0,0,14" />
+
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="32" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <TextBlock Grid.Column="0" Text="&#xE895;" FontFamily="Segoe MDL2 Assets"
+                           FontSize="18" Foreground="#777582" VerticalAlignment="Top" Margin="0,4,0,0" />
+                <StackPanel Grid.Column="1">
+                    <TextBlock Text="Automatic Updates" FontSize="14" Foreground="#24242B" />
+                    <TextBlock x:Name="AutoUpdateDescriptionTextBlock"
+                               Text="Check for VM Manager updates in the background and notify when one is available."
+                               Margin="0,10,14,0" FontSize="13" Foreground="#777582"
+                               TextWrapping="Wrap" />
+                </StackPanel>
+                <CheckBox x:Name="AutoUpdateToggle" Grid.Column="2"
+                          Style="{StaticResource ToggleSwitchStyle}"
+                          AutomationProperties.Name="Automatic updates"
+                          VerticalAlignment="Top" Margin="0,0,2,0"
+                          Click="AutoUpdateToggle_Click" />
+            </Grid>
+
+            <Border BorderBrush="#E1DDE5" BorderThickness="0,1,0,0" Margin="0,14,0,0" />
+        </StackPanel>
 
         <TextBlock x:Name="VersionTextBlock" Grid.Row="2"
                    Margin="16,0,16,14" HorizontalAlignment="Right"

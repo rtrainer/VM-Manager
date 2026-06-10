@@ -23,7 +23,9 @@ public sealed class TrayIconService : IDisposable {
             Visible = true
         };
         _notifyIcon.MouseDoubleClick += NotifyIcon_MouseDoubleClick;
+        _notifyIcon.BalloonTipClicked += (_, _) => _mainWindow.ShowFromTray();
         _mainWindow.DataChanged += (_, _) => RebuildMenu();
+        _mainWindow.UpdateAvailable += MainWindow_UpdateAvailable;
         RebuildMenu();
     }
 
@@ -40,11 +42,27 @@ public sealed class TrayIconService : IDisposable {
         }
     }
 
+    private void MainWindow_UpdateAvailable(object? sender, UpdateAvailableEventArgs e) {
+        string message = e.IsReadyToInstall
+            ? $"VM Manager {e.Version} is ready to install."
+            : $"VM Manager {e.Version} is available.";
+        _notifyIcon.ShowBalloonTip(
+            8000,
+            "VM Manager update",
+            $"{message} Right-click the tray icon and choose Install update.",
+            Forms.ToolTipIcon.Info);
+    }
+
     private void RebuildMenu() {
         var menu = new Forms.ContextMenuStrip();
         menu.Items.Add("Open dashboard", null, (_, _) => _mainWindow.ShowFromTray());
         menu.Items.Add("Refresh", null, async (_, _) => await _mainWindow.RefreshAsync());
         menu.Items.Add("Settings...", null, (_, _) => _mainWindow.ShowSettings());
+        if (_mainWindow.HasAvailableUpdate) {
+            menu.Items.Add($"Install update {_mainWindow.AvailableUpdateVersion}...", null,
+                async (_, _) => await _mainWindow.InstallAvailableUpdateAsync());
+        }
+
         menu.Items.Add(new Forms.ToolStripSeparator());
 
         foreach (VmGroup group in _mainWindow.Groups) {
