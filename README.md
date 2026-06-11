@@ -73,4 +73,16 @@ powershell -ExecutionPolicy Bypass -File .\installer\build-installer.ps1 -Update
 
 Update the `<Version>` property in `src\VmManager.App\VmManager.App.csproj` for each release build. The value is embedded into the application metadata and displayed at the bottom of the settings window.
 
+## GitHub release workflow
+
+The `Build Velopack Release` GitHub Action runs when `src\VmManager.App\VmManager.App.csproj` changes on `master`. If the `<Version>` value changed and a release tag for that version does not already exist, the workflow builds, tests, packages Velopack assets, and creates a GitHub release named `v<Version>`.
+
+The workflow passes this update feed URL into the packaged app:
+
+```text
+https://github.com/<owner>/<repo>/releases/latest/download
+```
+
+You can also run the workflow manually from the GitHub Actions tab.
+
 The MVP uses the installed Hyper-V PowerShell module behind `IHyperVService`. The adapter targets VMs by their stable Hyper-V ID, including machines with duplicate names.

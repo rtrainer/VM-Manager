@@ -1,0 +1,125 @@
+name: Build Velopack Release
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - src/VmManager.App/VmManager.App.csproj
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    name: Build release
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Read release version
+        id: version
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $projectPath = "src/VmManager.App/VmManager.App.csproj"
+          [xml]$project = Get-Content -Raw $projectPath
+          $version = @($project.Project.PropertyGroup |
+              ForEach-Object { $_.Version } |
+              Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } |
+              Select-Object -First 1)
+
+          if (-not $version) {
+              throw "Could not find a <Version> value in $projectPath."
+          }
+
+          $version = [string]$version
+          $tag = "v$version"
+          $shouldRelease = $true
+
+          if ("${{ github.event_name }}" -eq "push") {
+              $before = "${{ github.event.before }}"
+              if ($before -and $before -notmatch "^0+$") {
+                  $previousProject = & git show "$before`:$projectPath" 2>$null
+                  if ($LASTEXITCODE -eq 0 -and $previousProject) {
+                      [xml]$previousXml = $previousProject -join "`n"
+                      $previousVersion = @($previousXml.Project.PropertyGroup |
+                          ForEach-Object { $_.Version } |
+                          Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } |
+                          Select-Object -First 1)
+
+                      if ([string]$previousVersion -eq $version) {
+                          $shouldRelease = $false
+                          Write-Host "Project version is still $version; skipping release."
+                      }
+                  }
+              }
+          }
+
+          if ($shouldRelease) {
+              if (Get-Variable PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue) {
+                  $PSNativeCommandUseErrorActionPreference = $false
+              }
+
+              gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
+              if ($LASTEXITCODE -eq 0) {
+                  $shouldRelease = $false
+                  Write-Host "Release $tag already exists; skipping release."
+              }
+          }
+
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "tag=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "should_release=$($shouldRelease.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Restore
+        if: steps.version.outputs.should_release == 'true'
+        run: dotnet restore VmManager.slnx
+
+      - name: Build
+        if: steps.version.outputs.should_release == 'true'
+        run: dotnet build VmManager.slnx --configuration Release --no-restore
+
+      - name: Test
+        if: steps.version.outputs.should_release == 'true'
+        run: dotnet test VmManager.slnx --configuration Release --no-build --no-restore
+
+      - name: Build Velopack assets
+        if: steps.version.outputs.should_release == 'true'
+        shell: pwsh
+        run: |
+          $updateUrl = "https://github.com/${{ github.repository }}/releases/latest/download"
+          .\installer\build-installer.ps1 -Configuration Release -UpdateUrl $updateUrl
+
+      - name: Create GitHub release
+        if: steps.version.outputs.should_release == 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "${{ steps.version.outputs.tag }}"
+          $version = "${{ steps.version.outputs.version }}"
+          $notes = @"
+VM Manager $version
+
+Velopack release assets are attached to this release.
+The update feed URL for packaged builds is:
+https://github.com/${{ github.repository }}/releases/latest/download
+"@
+
+          gh release create $tag artifacts\velopack\* `
+              --repo $env:GITHUB_REPOSITORY `
+              --target $env:GITHUB_SHA `
+              --title "VM Manager $version" `
+              --notes $notes
