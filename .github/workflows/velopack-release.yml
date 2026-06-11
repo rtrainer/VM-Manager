@@ -75,7 +75,9 @@ jobs:
               }
 
               gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
-              if ($LASTEXITCODE -eq 0) {
+              $releaseViewExitCode = $LASTEXITCODE
+              $global:LASTEXITCODE = 0
+              if ($releaseViewExitCode -eq 0) {
                   $shouldRelease = $false
                   Write-Host "Release $tag already exists; skipping release."
               }
