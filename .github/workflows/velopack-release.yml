@@ -110,13 +110,13 @@ jobs:
         run: |
           $tag = "${{ steps.version.outputs.tag }}"
           $version = "${{ steps.version.outputs.version }}"
-          $notes = @"
-VM Manager $version
-
-Velopack release assets are attached to this release.
-The update feed URL for packaged builds is:
-https://github.com/${{ github.repository }}/releases/latest/download
-"@
+          $notes = @(
+              "VM Manager $version",
+              "",
+              "Velopack release assets are attached to this release.",
+              "The update feed URL for packaged builds is:",
+              "https://github.com/${{ github.repository }}/releases/latest/download"
+          ) -join [Environment]::NewLine
 
           gh release create $tag artifacts\velopack\* `
               --repo $env:GITHUB_REPOSITORY `
