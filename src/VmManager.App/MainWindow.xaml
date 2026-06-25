@@ -64,7 +64,7 @@
         </Grid>
 
         <DataGrid x:Name="VmGrid" Grid.Row="2" AutoGenerateColumns="False" IsReadOnly="True"
-                  SelectionMode="Single" CanUserAddRows="False" SelectionChanged="VmGrid_SelectionChanged"
+                  SelectionMode="Extended" CanUserAddRows="False" SelectionChanged="VmGrid_SelectionChanged"
                   PreviewMouseRightButtonDown="VmGrid_PreviewMouseRightButtonDown">
             <DataGrid.RowStyle>
                 <Style TargetType="{x:Type DataGridRow}">

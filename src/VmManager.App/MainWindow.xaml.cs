@@ -32,6 +32,7 @@ public partial class MainWindow : Window {
     private bool _allowClose;
     private bool _operationInProgress;
     private bool _updateCheckInProgress;
+    private readonly HashSet<Guid> _startingVmIds = [];
 
     public MainWindow(
         IHyperVService hyperVService,
@@ -144,16 +145,23 @@ public partial class MainWindow : Window {
     }
 
     public Task StartVmAsync(Guid vmId) =>
-        RunOperationAsync("Starting virtual machine...", () => _hyperVService.StartAsync(vmId));
+        StartVmsAsync([vmId], "Starting virtual machine...");
 
     public Task ShutDownVmAsync(Guid vmId) =>
         RunOperationAsync("Shutting down virtual machine...", () => _hyperVService.ShutDownAsync(vmId));
 
-    public Task StartGroupAsync(Guid groupId) =>
-        RunGroupOperationAsync(groupId, "Starting group...", vm => vm.CanStart, _hyperVService.StartAsync);
+    public Task StartGroupAsync(Guid groupId) {
+        VmGroup group = _groupCatalog.Groups.First(group => group.Id == groupId);
+        IReadOnlyList<Guid> targets = _virtualMachines
+            .Where(vm => group.VmIds.Contains(vm.Id) && CanStart(vm))
+            .Select(vm => vm.Id)
+            .ToList();
+
+        return StartVmsAsync(targets, "Starting group...");
+    }
 
     public Task ShutDownGroupAsync(Guid groupId) =>
-        RunGroupOperationAsync(groupId, "Shutting down group...", vm => vm.CanStop, _hyperVService.ShutDownAsync);
+        RunGroupOperationAsync(groupId, "Shutting down group...", CanStop, _hyperVService.ShutDownAsync);
 
     public async Task SetStartMinimizedAsync(bool startMinimized) {
         if (_settings.StartMinimized == startMinimized) {
@@ -315,7 +323,14 @@ public partial class MainWindow : Window {
         }
     }
 
-    private VmListRow? SelectedVm => VmGrid.SelectedItem as VmListRow;
+    private IReadOnlyList<VmListRow> SelectedVms => VmGrid.SelectedItems.Cast<VmListRow>().ToList();
+
+    private VmListRow? SingleSelectedVm {
+        get {
+            IReadOnlyList<VmListRow> selectedVms = SelectedVms;
+            return selectedVms.Count == 1 ? selectedVms[0] : null;
+        }
+    }
 
     private GroupOption? SelectedFilter => GroupFilterComboBox.SelectedItem as GroupOption;
 
@@ -343,7 +358,9 @@ public partial class MainWindow : Window {
     }
 
     private void ApplyGroupFilter() {
-        Guid? selectedVmId = SelectedVm?.VirtualMachine.Id;
+        HashSet<Guid> selectedVmIds = SelectedVms
+            .Select(row => row.VirtualMachine.Id)
+            .ToHashSet();
         Guid? selectedGroupId = SelectedFilter?.Id;
         IReadOnlyList<VirtualMachine> visibleVms = selectedGroupId is null
             ? _virtualMachines
@@ -352,16 +369,77 @@ public partial class MainWindow : Window {
                 .VmIds.Contains(vm.Id))
                 .ToList();
 
-        VmGrid.ItemsSource = visibleVms
+        IReadOnlyList<VmListRow> rows = visibleVms
             .Select(vm => new VmListRow(
                 vm,
                 string.Join(", ", _groupCatalog.Groups
                     .Where(group => group.VmIds.Contains(vm.Id))
                     .Select(group => group.Name))))
             .ToList();
-        VmGrid.SelectedItem = (VmGrid.ItemsSource as IReadOnlyList<VmListRow>)
-            ?.FirstOrDefault(row => row.VirtualMachine.Id == selectedVmId);
+
+        VmGrid.ItemsSource = rows;
+        foreach (VmListRow row in rows.Where(row => selectedVmIds.Contains(row.VirtualMachine.Id))) {
+            VmGrid.SelectedItems.Add(row);
+        }
+
         UpdateActionButtons();
+    }
+
+    private async Task StartVmsAsync(IEnumerable<Guid> vmIds, string status) {
+        if (_operationInProgress) {
+            return;
+        }
+
+        IReadOnlyList<VirtualMachine> targets = vmIds
+            .Distinct()
+            .Select(id => _virtualMachines.FirstOrDefault(vm => vm.Id == id))
+            .Where(vm => vm is not null && CanStart(vm))
+            .Select(vm => vm!)
+            .ToList();
+
+        if (targets.Count == 0) {
+            SetStatus("No virtual machines can be started.");
+            UpdateActionButtons();
+            return;
+        }
+
+        foreach (VirtualMachine vm in targets) {
+            _startingVmIds.Add(vm.Id);
+        }
+
+        SetStatus(targets.Count == 1 ? status : $"Starting {targets.Count} virtual machine(s)...");
+        UpdateActionButtons();
+
+        StartVmResult[] results = await Task.WhenAll(targets.Select(StartTrackedVmAsync));
+        int startedCount = results.Count(result => result.Exception is null);
+        IReadOnlyList<StartVmResult> failures = results.Where(result => result.Exception is not null).ToList();
+
+        if (failures.Count == 0) {
+            SetStatus(_startingVmIds.Count == 0
+                ? $"Started {startedCount} virtual machine(s)."
+                : $"Started {startedCount} virtual machine(s). {_startingVmIds.Count} start operation(s) still running.");
+        } else {
+            SetStatus($"Started {startedCount} virtual machine(s); {failures.Count} failed.");
+            string errorMessage = string.Join(Environment.NewLine, failures.Select(result =>
+                $"{result.VirtualMachine.Name}: {result.Exception!.Message}"));
+            MessageDialog.Show(this, errorMessage, "Unable to start virtual machine", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+
+        await RefreshAsync(silent: true);
+        UpdateActionButtons();
+    }
+
+    private async Task<StartVmResult> StartTrackedVmAsync(VirtualMachine vm) {
+        try {
+            await _hyperVService.StartAsync(vm.Id);
+            return new StartVmResult(vm, null);
+        } catch (Exception exception) {
+            AppLog.Write(exception);
+            return new StartVmResult(vm, exception);
+        } finally {
+            _startingVmIds.Remove(vm.Id);
+            UpdateActionButtons();
+        }
     }
 
     private async Task RunOperationAsync(string status, Func<Task> operation) {
@@ -400,28 +478,40 @@ public partial class MainWindow : Window {
 
     private void SetStatus(string message) => StatusTextBlock.Text = message.ReplaceLineEndings(" ");
 
+    private bool CanStart(VirtualMachine vm) => vm.CanStart && !_startingVmIds.Contains(vm.Id);
+
+    private bool CanStop(VirtualMachine vm) => vm.CanStop && !_startingVmIds.Contains(vm.Id);
+
     private void UpdateActionButtons() {
         VmGroup? filterGroup = SelectedFilterGroup;
         bool groupSelected = filterGroup is not null;
         DeleteGroupButton.IsEnabled = groupSelected && !_operationInProgress;
         StartGroupButton.IsEnabled = filterGroup is not null
-            && _virtualMachines.Any(vm => filterGroup.VmIds.Contains(vm.Id) && vm.CanStart)
+            && _virtualMachines.Any(vm => filterGroup.VmIds.Contains(vm.Id) && CanStart(vm))
             && !_operationInProgress;
         ShutDownGroupButton.IsEnabled = filterGroup is not null
-            && _virtualMachines.Any(vm => filterGroup.VmIds.Contains(vm.Id) && vm.CanStop)
+            && _virtualMachines.Any(vm => filterGroup.VmIds.Contains(vm.Id) && CanStop(vm))
             && !_operationInProgress;
 
-        StartVmButton.IsEnabled = SelectedVm?.VirtualMachine.CanStart == true && !_operationInProgress;
-        ShutDownVmButton.IsEnabled = SelectedVm?.VirtualMachine.CanStop == true && !_operationInProgress;
-        TurnOffVmButton.IsEnabled = SelectedVm?.VirtualMachine.CanStop == true && !_operationInProgress;
-        VmGroup? membershipGroup = SelectedMembershipGroup;
-        bool selectedVmIsGroupMember = SelectedVm is not null
-            && membershipGroup?.VmIds.Contains(SelectedVm.VirtualMachine.Id) == true;
-        AddToGroupButton.IsEnabled = membershipGroup is not null
-            && (SelectedVm is null || !selectedVmIsGroupMember)
+        IReadOnlyList<VmListRow> selectedVms = SelectedVms;
+        VmListRow? singleSelectedVm = selectedVms.Count == 1 ? selectedVms[0] : null;
+        StartVmButton.IsEnabled = selectedVms.Any(row => CanStart(row.VirtualMachine)) && !_operationInProgress;
+        ShutDownVmButton.IsEnabled = singleSelectedVm is not null
+            && CanStop(singleSelectedVm.VirtualMachine)
             && !_operationInProgress;
-        RemoveFromGroupButton.IsEnabled = SelectedVm is not null
-            && selectedVmIsGroupMember
+        TurnOffVmButton.IsEnabled = singleSelectedVm is not null
+            && CanStop(singleSelectedVm.VirtualMachine)
+            && !_operationInProgress;
+        VmGroup? membershipGroup = SelectedMembershipGroup;
+        bool anySelectedVmIsGroupMember = selectedVms.Any(row =>
+            membershipGroup?.VmIds.Contains(row.VirtualMachine.Id) == true);
+        bool anySelectedVmCanBeAdded = selectedVms.Any(row =>
+            membershipGroup?.VmIds.Contains(row.VirtualMachine.Id) == false);
+        AddToGroupButton.IsEnabled = membershipGroup is not null
+            && (selectedVms.Count == 0 || anySelectedVmCanBeAdded)
+            && !_operationInProgress;
+        RemoveFromGroupButton.IsEnabled = selectedVms.Count > 0
+            && anySelectedVmIsGroupMember
             && !_operationInProgress;
     }
 
@@ -457,12 +547,16 @@ public partial class MainWindow : Window {
     private void VmGrid_PreviewMouseRightButtonDown(object sender, MouseButtonEventArgs e) {
         DataGridRow? row = FindVisualParent<DataGridRow>(e.OriginalSource as DependencyObject);
         if (row is null) {
-            VmGrid.SelectedItem = null;
+            VmGrid.SelectedItems.Clear();
             VmGrid.ContextMenu.IsOpen = false;
             return;
         }
 
-        row.IsSelected = true;
+        if (!row.IsSelected) {
+            VmGrid.SelectedItems.Clear();
+            row.IsSelected = true;
+        }
+
         row.Focus();
         VmGrid.ContextMenu.PlacementTarget = row;
         VmGrid.ContextMenu.IsOpen = true;
@@ -470,22 +564,27 @@ public partial class MainWindow : Window {
     }
 
     private void VmContextMenu_Opened(object sender, RoutedEventArgs e) {
-        VirtualMachine? vm = SelectedVm?.VirtualMachine;
-        ContextStartVmMenuItem.IsEnabled = vm?.CanStart == true && !_operationInProgress;
-        ContextShutDownVmMenuItem.IsEnabled = vm?.CanStop == true && !_operationInProgress;
-        ContextTurnOffVmMenuItem.IsEnabled = vm?.CanStop == true && !_operationInProgress;
-        RebuildContextAddToGroupMenu(vm);
+        IReadOnlyList<VmListRow> selectedVms = SelectedVms;
+        VmListRow? singleSelectedVm = selectedVms.Count == 1 ? selectedVms[0] : null;
+        ContextStartVmMenuItem.IsEnabled = selectedVms.Any(row => CanStart(row.VirtualMachine)) && !_operationInProgress;
+        ContextShutDownVmMenuItem.IsEnabled = singleSelectedVm is not null
+            && CanStop(singleSelectedVm.VirtualMachine)
+            && !_operationInProgress;
+        ContextTurnOffVmMenuItem.IsEnabled = singleSelectedVm is not null
+            && CanStop(singleSelectedVm.VirtualMachine)
+            && !_operationInProgress;
+        RebuildContextAddToGroupMenu(selectedVms);
     }
 
-    private void RebuildContextAddToGroupMenu(VirtualMachine? vm) {
+    private void RebuildContextAddToGroupMenu(IReadOnlyList<VmListRow> selectedVms) {
         ContextAddToGroupMenuItem.Items.Clear();
-        if (vm is null || _operationInProgress) {
+        if (selectedVms.Count == 0 || _operationInProgress) {
             ContextAddToGroupMenuItem.IsEnabled = false;
             return;
         }
 
         IReadOnlyList<VmGroup> availableGroups = _groupCatalog.Groups
-            .Where(group => !group.VmIds.Contains(vm.Id))
+            .Where(group => selectedVms.Any(row => !group.VmIds.Contains(row.VirtualMachine.Id)))
             .ToList();
         ContextAddToGroupMenuItem.IsEnabled = availableGroups.Count > 0;
 
@@ -507,14 +606,12 @@ public partial class MainWindow : Window {
     }
 
     private async void ContextStartVmMenuItem_Click(object sender, RoutedEventArgs e) {
-        if (SelectedVm is not null) {
-            await StartVmAsync(SelectedVm.VirtualMachine.Id);
-        }
+        await StartSelectedVmsAsync();
     }
 
     private async void ContextShutDownVmMenuItem_Click(object sender, RoutedEventArgs e) {
-        if (SelectedVm is not null) {
-            await ShutDownVmAsync(SelectedVm.VirtualMachine.Id);
+        if (SingleSelectedVm is not null) {
+            await ShutDownVmAsync(SingleSelectedVm.VirtualMachine.Id);
         }
     }
 
@@ -522,16 +619,21 @@ public partial class MainWindow : Window {
         await TurnOffSelectedVmAsync();
 
     private async void ContextAddToGroupMenuItem_Click(object sender, RoutedEventArgs e) {
-        VmListRow? selectedVm = SelectedVm;
-        if (selectedVm is null || sender is not WpfMenuItem { Tag: Guid groupId }) {
+        IReadOnlyList<VmListRow> selectedVms = SelectedVms;
+        if (selectedVms.Count == 0 || sender is not WpfMenuItem { Tag: Guid groupId }) {
             return;
         }
 
         VmGroup group = _groupCatalog.Groups.First(group => group.Id == groupId);
-        await _groupCatalog.AddVmAsync(groupId, selectedVm.VirtualMachine.Id);
+        int addedCount = 0;
+        foreach (VmListRow selectedVm in selectedVms.Where(row => !group.VmIds.Contains(row.VirtualMachine.Id))) {
+            await _groupCatalog.AddVmAsync(groupId, selectedVm.VirtualMachine.Id);
+            addedCount++;
+        }
+
         RebuildGroupSelectors(SelectedFilter?.Id, groupId);
         ApplyGroupFilter();
-        SetStatus($"Added {selectedVm.Name} to {group.Name}.");
+        SetStatus($"Added {addedCount} virtual machine(s) to {group.Name}.");
         DataChanged?.Invoke(this, EventArgs.Empty);
     }
 
@@ -574,23 +676,28 @@ public partial class MainWindow : Window {
             return;
         }
 
-        VmListRow? selectedVm = SelectedVm;
-        if (selectedVm is null) {
+        IReadOnlyList<VmListRow> selectedVms = SelectedVms;
+        if (selectedVms.Count == 0) {
             await AddSelectedVmsToGroupAsync(group);
             return;
         }
 
         VmGroup currentGroup = _groupCatalog.Groups.First(candidate => candidate.Id == group.Id);
-        bool alreadyInGroup = currentGroup.VmIds.Contains(selectedVm.VirtualMachine.Id);
-        if (alreadyInGroup) {
-            SetStatus($"{selectedVm.Name} is already in {currentGroup.Name}.");
+        IReadOnlyList<VmListRow> targets = selectedVms
+            .Where(row => !currentGroup.VmIds.Contains(row.VirtualMachine.Id))
+            .ToList();
+        if (targets.Count == 0) {
+            SetStatus("Selected virtual machine(s) are already in the group.");
             return;
         }
 
-        await _groupCatalog.AddVmAsync(group.Id, selectedVm.VirtualMachine.Id);
+        foreach (VmListRow selectedVm in targets) {
+            await _groupCatalog.AddVmAsync(group.Id, selectedVm.VirtualMachine.Id);
+        }
+
         RebuildGroupSelectors(SelectedFilter?.Id, group.Id);
         ApplyGroupFilter();
-        SetStatus($"Added {selectedVm.Name} to {currentGroup.Name}.");
+        SetStatus($"Added {targets.Count} virtual machine(s) to {currentGroup.Name}.");
         DataChanged?.Invoke(this, EventArgs.Empty);
     }
 
@@ -623,8 +730,8 @@ public partial class MainWindow : Window {
     }
 
     private async void RemoveFromGroupButton_Click(object sender, RoutedEventArgs e) {
-        VmListRow? selectedVm = SelectedVm;
-        if (selectedVm is null) {
+        IReadOnlyList<VmListRow> selectedVms = SelectedVms;
+        if (selectedVms.Count == 0) {
             SetStatus("Select a virtual machine before removing it from a group.");
             return;
         }
@@ -635,25 +742,28 @@ public partial class MainWindow : Window {
         }
 
         VmGroup currentGroup = _groupCatalog.Groups.First(candidate => candidate.Id == group.Id);
-        bool wasInGroup = currentGroup.VmIds.Contains(selectedVm.VirtualMachine.Id);
-        await _groupCatalog.RemoveVmAsync(group.Id, selectedVm.VirtualMachine.Id);
+        IReadOnlyList<VmListRow> targets = selectedVms
+            .Where(row => currentGroup.VmIds.Contains(row.VirtualMachine.Id))
+            .ToList();
+        foreach (VmListRow selectedVm in targets) {
+            await _groupCatalog.RemoveVmAsync(group.Id, selectedVm.VirtualMachine.Id);
+        }
+
         RebuildGroupSelectors(SelectedFilter?.Id, group.Id);
         ApplyGroupFilter();
-        SetStatus(wasInGroup
-            ? $"Removed {selectedVm.Name} from {group.Name}."
-            : $"{selectedVm.Name} is not in {group.Name}.");
+        SetStatus(targets.Count > 0
+            ? $"Removed {targets.Count} virtual machine(s) from {group.Name}."
+            : "Selected virtual machine(s) are not in the group.");
         DataChanged?.Invoke(this, EventArgs.Empty);
     }
 
     private async void StartVmButton_Click(object sender, RoutedEventArgs e) {
-        if (SelectedVm is not null) {
-            await StartVmAsync(SelectedVm.VirtualMachine.Id);
-        }
+        await StartSelectedVmsAsync();
     }
 
     private async void ShutDownVmButton_Click(object sender, RoutedEventArgs e) {
-        if (SelectedVm is not null) {
-            await ShutDownVmAsync(SelectedVm.VirtualMachine.Id);
+        if (SingleSelectedVm is not null) {
+            await ShutDownVmAsync(SingleSelectedVm.VirtualMachine.Id);
         }
     }
 
@@ -661,18 +771,22 @@ public partial class MainWindow : Window {
         await TurnOffSelectedVmAsync();
     }
 
+    private Task StartSelectedVmsAsync() =>
+        StartVmsAsync(SelectedVms.Select(row => row.VirtualMachine.Id), "Starting virtual machine...");
+
     private async Task TurnOffSelectedVmAsync() {
-        if (SelectedVm is null) {
+        VmListRow? selectedVm = SingleSelectedVm;
+        if (selectedVm is null) {
             return;
         }
 
-        var confirmation = new TurnOffConfirmationDialog(SelectedVm.Name) { Owner = this };
+        var confirmation = new TurnOffConfirmationDialog(selectedVm.Name) { Owner = this };
         if (confirmation.ShowDialog() != true) {
             return;
         }
 
         await RunOperationAsync("Turning off virtual machine...",
-            () => _hyperVService.TurnOffAsync(SelectedVm.VirtualMachine.Id));
+            () => _hyperVService.TurnOffAsync(selectedVm.VirtualMachine.Id));
     }
 
     private async void StartGroupButton_Click(object sender, RoutedEventArgs e) {
@@ -778,6 +892,8 @@ public partial class MainWindow : Window {
     }
 
     private sealed record GroupOption(Guid? Id, string Name);
+
+    private sealed record StartVmResult(VirtualMachine VirtualMachine, Exception? Exception);
 
     private sealed record VmListRow(VirtualMachine VirtualMachine, string GroupsDisplay) {
         public string Name => VirtualMachine.Name;
