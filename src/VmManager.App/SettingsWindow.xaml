@@ -143,6 +143,6 @@
         <TextBlock x:Name="VersionTextBlock" Grid.Row="2"
                    Margin="16,0,16,14" HorizontalAlignment="Right"
                    FontSize="12" Foreground="#777582"
-                   d:Text="Version 0.2.8-dev" />
+                   d:Text="Version 0.2.8" />
     </Grid>
 </Window>
