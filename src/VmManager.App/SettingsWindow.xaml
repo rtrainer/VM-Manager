@@ -6,10 +6,10 @@
         mc:Ignorable="d"
         Title="VM Manager Settings"
         Icon="Assets/AppIcon.ico"
-        Width="500" Height="410"
-        MinWidth="460" MinHeight="390"
+        Width="500" Height="470"
+        MinWidth="460" MinHeight="450"
         d:DesignWidth="500"
-        d:DesignHeight="410"
+        d:DesignHeight="470"
         WindowStartupLocation="Manual"
         ResizeMode="NoResize"
         ShowInTaskbar="False"
@@ -126,16 +126,55 @@
                 <StackPanel Grid.Column="1">
                     <TextBlock Text="Automatic Updates" FontSize="14" Foreground="#24242B" />
                     <TextBlock x:Name="AutoUpdateDescriptionTextBlock"
-                               Text="Check for VM Manager updates in the background and notify when one is available."
+                               Text="Automatically install VM Manager updates when one is found."
                                Margin="0,10,14,0" FontSize="13" Foreground="#777582"
                                TextWrapping="Wrap" />
                 </StackPanel>
-                <CheckBox x:Name="AutoUpdateToggle" Grid.Column="2"
-                          Style="{StaticResource ToggleSwitchStyle}"
-                          AutomationProperties.Name="Automatic updates"
-                          VerticalAlignment="Top" Margin="0,0,2,0"
-                          Click="AutoUpdateToggle_Click" />
+                <StackPanel Grid.Column="2" HorizontalAlignment="Right">
+                    <CheckBox x:Name="AutoUpdateToggle"
+                              Style="{StaticResource ToggleSwitchStyle}"
+                              AutomationProperties.Name="Automatic updates"
+                              HorizontalAlignment="Right" Margin="0,0,2,0"
+                              Click="AutoUpdateToggle_Click" />
+                    <Button x:Name="CheckForUpdatesButton"
+                            Content="Check now"
+                            Width="92" Height="28" Margin="0,12,2,0"
+                            Click="CheckForUpdatesButton_Click" />
+                </StackPanel>
             </Grid>
+
+            <Border x:Name="AvailableUpdatePanel"
+                    Visibility="Collapsed"
+                    Margin="32,14,0,0"
+                    Padding="10,8"
+                    Background="#EEF6FF"
+                    BorderBrush="#BBD7F0"
+                    BorderThickness="1"
+                    CornerRadius="4">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0" Margin="0,0,12,0">
+                        <TextBlock x:Name="UpdateAvailableTextBlock"
+                                   Text="An update is available."
+                                   FontSize="13" FontWeight="SemiBold"
+                                   Foreground="#203A4D" />
+                        <TextBlock Text="Install it now or leave automatic updates enabled."
+                                   Margin="0,4,0,0"
+                                   FontSize="12"
+                                   Foreground="#506A7F"
+                                   TextWrapping="Wrap" />
+                    </StackPanel>
+                    <Button x:Name="InstallUpdateButton"
+                            Grid.Column="1"
+                            Content="Update"
+                            Width="92" Height="28"
+                            VerticalAlignment="Center"
+                            Click="InstallUpdateButton_Click" />
+                </Grid>
+            </Border>
 
             <Border BorderBrush="#E1DDE5" BorderThickness="0,1,0,0" Margin="0,14,0,0" />
         </StackPanel>

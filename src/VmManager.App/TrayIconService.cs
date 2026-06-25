@@ -43,13 +43,19 @@ public sealed class TrayIconService : IDisposable {
     }
 
     private void MainWindow_UpdateAvailable(object? sender, UpdateAvailableEventArgs e) {
-        string message = e.IsReadyToInstall
-            ? $"VM Manager {e.Version} is ready to install."
-            : $"VM Manager {e.Version} is available.";
+        string message = e.Kind switch {
+            UpdateNotificationKind.Installing => $"VM Manager {e.Version} is installing.",
+            UpdateNotificationKind.ReadyToInstall => $"VM Manager {e.Version} is ready to install.",
+            _ => $"VM Manager {e.Version} is available."
+        };
+        string instruction = e.Kind == UpdateNotificationKind.Installing
+            ? "VM Manager will restart to apply it."
+            : "Right-click the tray icon and choose Install update.";
+
         _notifyIcon.ShowBalloonTip(
             8000,
             "VM Manager update",
-            $"{message} Right-click the tray icon and choose Install update.",
+            $"{message} {instruction}",
             Forms.ToolTipIcon.Info);
     }
 
@@ -58,6 +64,10 @@ public sealed class TrayIconService : IDisposable {
         menu.Items.Add("Open dashboard", null, (_, _) => _mainWindow.ShowFromTray());
         menu.Items.Add("Refresh", null, async (_, _) => await _mainWindow.RefreshAsync());
         menu.Items.Add("Settings...", null, (_, _) => _mainWindow.ShowSettings());
+        if (_mainWindow.AutoUpdateAvailable) {
+            menu.Items.Add("Check for updates", null, async (_, _) => await _mainWindow.CheckForUpdatesNowAsync());
+        }
+
         if (_mainWindow.HasAvailableUpdate) {
             menu.Items.Add($"Install update {_mainWindow.AvailableUpdateVersion}...", null,
                 async (_, _) => await _mainWindow.InstallAvailableUpdateAsync());
