@@ -59,9 +59,17 @@ public partial class App : System.Windows.Application {
 
             var settingsRepository = new JsonAppSettingsRepository(Path.Combine(dataDirectory, "settings.json"));
             AppSettings settings = await settingsRepository.LoadAsync();
+            var loginStartupService = new LoginStartupService();
+
+            _splashWindow.SetStatus("Applying startup preferences...");
+            try {
+                loginStartupService.SetEnabled(settings.StartAtLogin);
+            } catch (Exception exception) {
+                AppLog.Write(exception);
+            }
 
             _splashWindow.SetStatus("Preparing the system tray...");
-            var mainWindow = new MainWindow(new PowerShellHyperVService(), catalog, settingsRepository, settings);
+            var mainWindow = new MainWindow(new PowerShellHyperVService(), catalog, settingsRepository, loginStartupService, settings);
             MainWindow = mainWindow;
             _trayIcon = new TrayIconService(mainWindow);
 

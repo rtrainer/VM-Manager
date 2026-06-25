@@ -1,10 +1,15 @@
 <Window x:Class="VmManager.App.SettingsWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d"
         Title="VM Manager Settings"
         Icon="Assets/AppIcon.ico"
-        Width="500" Height="340"
-        MinWidth="460" MinHeight="320"
+        Width="500" Height="410"
+        MinWidth="460" MinHeight="390"
+        d:DesignWidth="500"
+        d:DesignHeight="410"
         WindowStartupLocation="Manual"
         ResizeMode="NoResize"
         ShowInTaskbar="False"
@@ -70,6 +75,31 @@
                 <TextBlock Grid.Column="0" Text="&#xE7E8;" FontFamily="Segoe MDL2 Assets"
                            FontSize="18" Foreground="#777582" VerticalAlignment="Top" Margin="0,4,0,0" />
                 <StackPanel Grid.Column="1">
+                    <TextBlock Text="Start at Login" FontSize="14" Foreground="#24242B" />
+                    <TextBlock Text="Start VM Manager automatically when you sign in to Windows."
+                               Margin="0,10,14,0" FontSize="13" Foreground="#777582"
+                               TextWrapping="Wrap" />
+                </StackPanel>
+                <CheckBox x:Name="StartAtLoginToggle" Grid.Column="2"
+                          Style="{StaticResource ToggleSwitchStyle}"
+                          AutomationProperties.Name="Start at login"
+                          VerticalAlignment="Top" Margin="0,0,2,0"
+                          d:IsChecked="True"
+                          Click="StartAtLoginToggle_Click" />
+            </Grid>
+
+            <Border BorderBrush="#E1DDE5" BorderThickness="0,1,0,0" Margin="0,0,0,14" />
+
+            <Grid Margin="0,0,0,14">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="32" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <TextBlock Grid.Column="0" Text="&#xE7E8;" FontFamily="Segoe MDL2 Assets"
+                           FontSize="18" Foreground="#777582" VerticalAlignment="Top" Margin="0,4,0,0" />
+                <StackPanel Grid.Column="1">
                     <TextBlock Text="Start Minimized" FontSize="14" Foreground="#24242B" />
                     <TextBlock Text="Open VM Manager in the system tray when it starts."
                                Margin="0,10,14,0" FontSize="13" Foreground="#777582"
@@ -112,6 +142,7 @@
 
         <TextBlock x:Name="VersionTextBlock" Grid.Row="2"
                    Margin="16,0,16,14" HorizontalAlignment="Right"
-                   FontSize="12" Foreground="#777582" />
+                   FontSize="12" Foreground="#777582"
+                   d:Text="Version 0.2.8-dev" />
     </Grid>
 </Window>

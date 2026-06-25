@@ -20,6 +20,7 @@ public partial class MainWindow : Window {
     private readonly IHyperVService _hyperVService;
     private readonly VmGroupCatalog _groupCatalog;
     private readonly IAppSettingsRepository _settingsRepository;
+    private readonly LoginStartupService _loginStartupService;
     private readonly DispatcherTimer _refreshTimer;
     private readonly DispatcherTimer _updateTimer;
     private AppSettings _settings;
@@ -36,10 +37,12 @@ public partial class MainWindow : Window {
         IHyperVService hyperVService,
         VmGroupCatalog groupCatalog,
         IAppSettingsRepository settingsRepository,
+        LoginStartupService loginStartupService,
         AppSettings settings) {
         _hyperVService = hyperVService;
         _groupCatalog = groupCatalog;
         _settingsRepository = settingsRepository;
+        _loginStartupService = loginStartupService;
         _settings = settings;
 
         InitializeComponent();
@@ -64,6 +67,8 @@ public partial class MainWindow : Window {
     public bool StartMinimized => _settings.StartMinimized;
 
     public bool AutoUpdateEnabled => _settings.AutoUpdateEnabled;
+
+    public bool StartAtLogin => _settings.StartAtLogin;
 
     public bool AutoUpdateAvailable => CreateUpdateManager() is not null;
 
@@ -178,6 +183,17 @@ public partial class MainWindow : Window {
         } else {
             StopBackgroundUpdateChecks();
         }
+    }
+
+    public async Task SetStartAtLoginAsync(bool startAtLogin) {
+        if (_settings.StartAtLogin == startAtLogin) {
+            return;
+        }
+
+        _loginStartupService.SetEnabled(startAtLogin);
+        AppSettings updatedSettings = _settings with { StartAtLogin = startAtLogin };
+        await _settingsRepository.SaveAsync(updatedSettings);
+        _settings = updatedSettings;
     }
 
     public void StartBackgroundUpdateChecks(bool checkNow) {

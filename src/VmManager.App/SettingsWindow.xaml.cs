@@ -1,4 +1,3 @@
-using System.Reflection;
 using System.Windows;
 
 namespace VmManager.App;
@@ -10,14 +9,26 @@ public partial class SettingsWindow : Window {
     public SettingsWindow(MainWindow mainWindow) {
         _mainWindow = mainWindow;
         InitializeComponent();
+        StartAtLoginToggle.IsChecked = mainWindow.StartAtLogin;
         StartMinimizedToggle.IsChecked = mainWindow.StartMinimized;
         AutoUpdateToggle.IsChecked = mainWindow.AutoUpdateEnabled;
         ConfigureAutoUpdateToggle();
-        VersionTextBlock.Text = $"Version {GetApplicationVersion()}";
+        VersionTextBlock.Text = $"Version {ApplicationVersion.Display}";
     }
 
     private void Window_Loaded(object sender, RoutedEventArgs e) {
         DialogPlacement.CenterOverOwner(this);
+    }
+
+    private async void StartAtLoginToggle_Click(object sender, RoutedEventArgs e) {
+        if (_saving) {
+            return;
+        }
+
+        await SaveSettingAsync(
+            StartAtLoginToggle,
+            () => _mainWindow.StartAtLogin,
+            enabled => _mainWindow.SetStartAtLoginAsync(enabled));
     }
 
     private async void StartMinimizedToggle_Click(object sender, RoutedEventArgs e) {
@@ -66,13 +77,7 @@ public partial class SettingsWindow : Window {
 
         AutoUpdateToggle.IsEnabled = false;
         AutoUpdateToggle.IsChecked = false;
-        AutoUpdateDescriptionTextBlock.Text = "Automatic updates require an installed Velopack app and a configured update feed URL.";
+        AutoUpdateDescriptionTextBlock.Text = "Automatic updates require VM Manager to be installed.";
     }
 
-    private static string GetApplicationVersion() {
-        Assembly assembly = typeof(App).Assembly;
-        return assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
-            ?? assembly.GetName().Version?.ToString(3)
-            ?? "Unknown";
-    }
 }
