@@ -28,6 +28,8 @@
                     <TextBlock Text="VM Manager" FontSize="28" FontWeight="SemiBold" Foreground="#202428" />
                     <TextBlock Text="Local Hyper-V management" Margin="0,4,0,0"
                                FontSize="13" Foreground="#687078" />
+                    <TextBlock x:Name="VersionTextBlock" Margin="0,4,0,0"
+                               FontSize="12" Foreground="#7A828A" />
                 </StackPanel>
             </StackPanel>
 

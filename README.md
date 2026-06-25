@@ -2,7 +2,7 @@
 
 VM Manager is a Windows system-tray application for managing local Hyper-V virtual machines.
 
-Current release: **0.2.7**
+Current release: **0.2.8-dev**
 
 ## MVP features
 
@@ -20,6 +20,7 @@ Current release: **0.2.7**
 - Hides the dashboard to the system tray when the window is closed.
 - Reopens the dashboard by double-clicking the system tray icon.
 - Shows startup progress while loading settings and discovering local Hyper-V VMs.
+- Starts automatically when the user signs in to Windows by default.
 - Optionally starts minimized directly to the system tray.
 - Provides a dedicated settings window from the dashboard gear button or tray menu.
 - Displays the application release version in the settings window.
@@ -45,6 +46,7 @@ Closing the dashboard hides it. Double-click the tray icon to reopen it, or use 
 
 - Settings: `%LocalAppData%\VmManager\settings.json`
 - VM groups: `%LocalAppData%\VmManager\groups.json`
+- Windows sign-in startup: `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`
 - Startup and fatal-error diagnostics: `%LocalAppData%\VmManager\vm-manager.log`
 
 ## Build and test
@@ -83,6 +85,8 @@ To remove stale VM Manager entries, run the same command with `-Apply`. Add `-Re
 ## Release version
 
 Update the `<Version>` property in `src\VmManager.App\VmManager.App.csproj` for each release build. The value is embedded into the application metadata and displayed at the bottom of the settings window.
+
+When creating a feature branch, bump the version number and append `-dev`. When merging into `master`, remove the `-dev` suffix without bumping the numeric version again unless that is explicitly required.
 
 ## GitHub release workflow
 
