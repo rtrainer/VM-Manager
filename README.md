@@ -69,6 +69,16 @@ Automatic updates are optional and disabled by default. When enabled, VM Manager
 powershell -ExecutionPolicy Bypass -File .\installer\build-installer.ps1 -UpdateUrl "https://example.com/vm-manager/releases"
 ```
 
+## Tray icon cleanup
+
+Windows can keep old notification-area registrations after running both a local debug build and the installed app. If duplicate VM Manager entries appear under **Settings > Personalization > Taskbar > Other system tray icons**, inspect them with:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\installer\clear-stale-tray-icons.ps1
+```
+
+To remove stale VM Manager entries, run the same command with `-Apply`. Add `-RestartExplorer` if the Settings app does not refresh immediately.
+
 ## Release version
 
 Update the `<Version>` property in `src\VmManager.App\VmManager.App.csproj` for each release build. The value is embedded into the application metadata and displayed at the bottom of the settings window.
