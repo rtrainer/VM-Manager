@@ -14,6 +14,7 @@ Current release: **0.2.6**
 - Creates custom groups and assigns one or more VMs to groups.
 - Starts or shuts down every applicable VM in a group.
 - Exposes VM group actions from the dashboard and system tray.
+- Highlights running VMs with a pale green dashboard row background.
 - Displays running VMs in bold green text in the system tray menu.
 - Uses a centered confirmation dialog before forcefully turning off a VM.
 - Hides the dashboard to the system tray when the window is closed.

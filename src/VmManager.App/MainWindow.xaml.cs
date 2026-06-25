@@ -731,6 +731,7 @@ public partial class MainWindow : Window {
     private sealed record VmListRow(VirtualMachine VirtualMachine, string GroupsDisplay) {
         public string Name => VirtualMachine.Name;
         public VirtualMachineState State => VirtualMachine.State;
+        public bool IsRunning => State == VirtualMachineState.Running;
         public string CpuDisplay => $"{VirtualMachine.CpuUsage}%";
         public string MemoryDisplay => $"{VirtualMachine.MemoryAssignedBytes / 1024d / 1024d:N0} MB";
     }
