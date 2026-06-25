@@ -2,7 +2,7 @@
 
 VM Manager is a Windows system-tray application for managing local Hyper-V virtual machines.
 
-Current release: **0.2.9-dev**
+Current release: **0.2.9**
 
 ## MVP features
 
