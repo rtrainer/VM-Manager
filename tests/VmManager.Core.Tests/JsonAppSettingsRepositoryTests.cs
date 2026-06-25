@@ -13,6 +13,7 @@ public sealed class JsonAppSettingsRepositoryTests : IDisposable {
         AppSettings settings = await repository.LoadAsync();
 
         Assert.False(settings.StartMinimized);
+        Assert.False(settings.AutoUpdateEnabled);
         Assert.True(settings.StartAtLogin);
     }
 

@@ -16,7 +16,7 @@ using WpfMenuItem = System.Windows.Controls.MenuItem;
 namespace VmManager.App;
 
 public partial class MainWindow : Window {
-    private static readonly TimeSpan UpdateCheckInterval = TimeSpan.FromHours(6);
+    private static readonly TimeSpan UpdateCheckInterval = TimeSpan.FromHours(1);
     private readonly IHyperVService _hyperVService;
     private readonly VmGroupCatalog _groupCatalog;
     private readonly IAppSettingsRepository _settingsRepository;
@@ -27,7 +27,7 @@ public partial class MainWindow : Window {
     private IReadOnlyList<VirtualMachine> _virtualMachines = [];
     private UpdateInfo? _availableUpdate;
     private VelopackAsset? _readyUpdate;
-    private string? _lastNotifiedUpdateVersion;
+    private string? _lastNotifiedUpdateKey;
     private SettingsWindow? _settingsWindow;
     private bool _allowClose;
     private bool _operationInProgress;
@@ -180,9 +180,9 @@ public partial class MainWindow : Window {
 
         if (autoUpdateEnabled) {
             StartBackgroundUpdateChecks(checkNow: true);
-        } else {
-            StopBackgroundUpdateChecks();
         }
+
+        DataChanged?.Invoke(this, EventArgs.Empty);
     }
 
     public async Task SetStartAtLoginAsync(bool startAtLogin) {
@@ -197,7 +197,7 @@ public partial class MainWindow : Window {
     }
 
     public void StartBackgroundUpdateChecks(bool checkNow) {
-        if (!_settings.AutoUpdateEnabled || !AutoUpdateAvailable) {
+        if (!AutoUpdateAvailable) {
             return;
         }
 
@@ -210,15 +210,21 @@ public partial class MainWindow : Window {
         }
     }
 
+    public Task CheckForUpdatesNowAsync() => CheckForUpdatesAsync(silent: false);
+
     public async Task CheckForUpdatesAsync(bool silent = true) {
-        if (!_settings.AutoUpdateEnabled || _updateCheckInProgress) {
+        if (_updateCheckInProgress) {
+            if (!silent && _updateCheckInProgress) {
+                SetStatus("An update check is already in progress.");
+            }
+
             return;
         }
 
         UpdateManager? updateManager = CreateUpdateManager();
         if (updateManager is null) {
             if (!silent) {
-                SetStatus("Automatic updates are not configured for this build.");
+                SetStatus("Updates are not configured for this build.");
             }
 
             return;
@@ -228,9 +234,16 @@ public partial class MainWindow : Window {
         try {
             VelopackAsset? pendingUpdate = updateManager.UpdatePendingRestart;
             if (pendingUpdate is not null) {
+                _availableUpdate = null;
                 _readyUpdate = pendingUpdate;
-                NotifyUpdateAvailable(pendingUpdate.Version.ToString(), isReadyToInstall: true);
                 DataChanged?.Invoke(this, EventArgs.Empty);
+                if (_settings.AutoUpdateEnabled) {
+                    NotifyUpdateAvailable(pendingUpdate.Version.ToString(), UpdateNotificationKind.Installing);
+                    ApplyUpdateAndRestart(updateManager, pendingUpdate);
+                    return;
+                }
+
+                NotifyUpdateAvailable(pendingUpdate.Version.ToString(), UpdateNotificationKind.ReadyToInstall);
                 return;
             }
 
@@ -242,7 +255,7 @@ public partial class MainWindow : Window {
             if (update is null) {
                 _availableUpdate = null;
                 _readyUpdate = null;
-                _lastNotifiedUpdateVersion = null;
+                _lastNotifiedUpdateKey = null;
                 DataChanged?.Invoke(this, EventArgs.Empty);
                 if (!silent) {
                     SetStatus("VM Manager is up to date.");
@@ -252,9 +265,15 @@ public partial class MainWindow : Window {
             }
 
             _availableUpdate = update;
-            SetStatus($"Update {update.TargetFullRelease.Version} is available.");
-            NotifyUpdateAvailable(update.TargetFullRelease.Version.ToString(), isReadyToInstall: false);
+            _readyUpdate = null;
             DataChanged?.Invoke(this, EventArgs.Empty);
+            if (_settings.AutoUpdateEnabled) {
+                await DownloadUpdateAsync(updateManager, update, automatic: true);
+                return;
+            }
+
+            SetStatus($"Update {update.TargetFullRelease.Version} is available.");
+            NotifyUpdateAvailable(update.TargetFullRelease.Version.ToString(), UpdateNotificationKind.Available);
         } catch (Exception exception) {
             AppLog.Write(exception);
             SetStatus($"Unable to check for updates: {exception.Message}");
@@ -288,13 +307,7 @@ public partial class MainWindow : Window {
                 return;
             }
 
-            SetStatus($"Downloading update {update.TargetFullRelease.Version}...");
-            await updateManager.DownloadUpdatesAsync(update, progress =>
-                Dispatcher.BeginInvoke(() => SetStatus($"Downloading update {update.TargetFullRelease.Version}... {progress}%")));
-            _availableUpdate = null;
-            _readyUpdate = update.TargetFullRelease;
-            DataChanged?.Invoke(this, EventArgs.Empty);
-            PromptToRestartForUpdate(updateManager, update.TargetFullRelease);
+            await DownloadUpdateAsync(updateManager, update, automatic: false);
         } catch (Exception exception) {
             AppLog.Write(exception);
             SetStatus($"Unable to install update: {exception.Message}");
@@ -714,21 +727,43 @@ public partial class MainWindow : Window {
             .FirstOrDefault(attribute => attribute.Key == "VelopackUpdateUrl")
             ?.Value;
 
-    private void StopBackgroundUpdateChecks() {
-        _updateTimer.Stop();
-        _availableUpdate = null;
-        _readyUpdate = null;
-        _lastNotifiedUpdateVersion = null;
-        DataChanged?.Invoke(this, EventArgs.Empty);
-    }
+    private async Task DownloadUpdateAsync(UpdateManager updateManager, UpdateInfo update, bool automatic) {
+        string version = update.TargetFullRelease.Version.ToString();
+        if (automatic) {
+            NotifyUpdateAvailable(version, UpdateNotificationKind.Installing);
+        }
 
-    private void NotifyUpdateAvailable(string version, bool isReadyToInstall) {
-        if (_lastNotifiedUpdateVersion == version) {
+        SetStatus($"Downloading update {version}...");
+        await updateManager.DownloadUpdatesAsync(update, progress =>
+            Dispatcher.BeginInvoke(() => SetStatus($"Downloading update {version}... {progress}%")));
+
+        _availableUpdate = null;
+        _readyUpdate = update.TargetFullRelease;
+        DataChanged?.Invoke(this, EventArgs.Empty);
+
+        if (automatic) {
+            ApplyUpdateAndRestart(updateManager, update.TargetFullRelease);
             return;
         }
 
-        _lastNotifiedUpdateVersion = version;
-        UpdateAvailable?.Invoke(this, new UpdateAvailableEventArgs(version, isReadyToInstall));
+        NotifyUpdateAvailable(version, UpdateNotificationKind.ReadyToInstall);
+        PromptToRestartForUpdate(updateManager, update.TargetFullRelease);
+    }
+
+    private void NotifyUpdateAvailable(string version, UpdateNotificationKind kind) {
+        string notificationKey = $"{kind}:{version}";
+        if (_lastNotifiedUpdateKey == notificationKey) {
+            return;
+        }
+
+        _lastNotifiedUpdateKey = notificationKey;
+        UpdateAvailable?.Invoke(this, new UpdateAvailableEventArgs(version, kind));
+    }
+
+    private void ApplyUpdateAndRestart(UpdateManager updateManager, VelopackAsset update) {
+        SetStatus($"Applying update {update.Version}...");
+        _allowClose = true;
+        updateManager.ApplyUpdatesAndRestart(update);
     }
 
     private void PromptToRestartForUpdate(UpdateManager updateManager, VelopackAsset update) {
@@ -753,8 +788,16 @@ public partial class MainWindow : Window {
     }
 }
 
-public sealed class UpdateAvailableEventArgs(string version, bool isReadyToInstall) : EventArgs {
+public sealed class UpdateAvailableEventArgs(string version, UpdateNotificationKind kind) : EventArgs {
     public string Version { get; } = version;
 
-    public bool IsReadyToInstall { get; } = isReadyToInstall;
+    public UpdateNotificationKind Kind { get; } = kind;
+
+    public bool IsReadyToInstall => Kind == UpdateNotificationKind.ReadyToInstall;
+}
+
+public enum UpdateNotificationKind {
+    Available,
+    Installing,
+    ReadyToInstall
 }

@@ -2,7 +2,7 @@
 
 VM Manager is a Windows system-tray application for managing local Hyper-V virtual machines.
 
-Current release: **0.2.8**
+Current release: **0.2.9-dev**
 
 ## MVP features
 
@@ -66,7 +66,7 @@ powershell -ExecutionPolicy Bypass -File .\installer\build-installer.ps1
 
 The script publishes a self-contained `win-x64` build and creates Velopack release assets in `artifacts\velopack`, including `LittleBitsSoftware.VmManager-win-Setup.exe`.
 
-Automatic updates are optional and disabled by default. When enabled, VM Manager checks in the background and shows a tray notification when an update is available. To make the settings toggle available in a packaged build, host the Velopack release files from `artifacts\velopack` and pass that feed URL when building:
+VM Manager checks for updates at startup, repeats the check every hour, and can also check manually from Settings or the tray menu. Automatic updates are off by default. When automatic updates are enabled, VM Manager shows a tray notification, downloads the update, and restarts to apply it. When automatic updates are disabled, VM Manager shows a tray notification and displays the available update in Settings with an update button. To make update checks available in a packaged build, host the Velopack release files from `artifacts\velopack` and pass that feed URL when building:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\installer\build-installer.ps1 -UpdateUrl "https://example.com/vm-manager/releases"

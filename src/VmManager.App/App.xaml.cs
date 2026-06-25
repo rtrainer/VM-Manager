@@ -76,7 +76,7 @@ public partial class App : System.Windows.Application {
             _splashWindow.SetStatus("Discovering local Hyper-V virtual machines...");
             await mainWindow.RefreshAsync();
 
-            mainWindow.StartBackgroundUpdateChecks(checkNow: settings.AutoUpdateEnabled);
+            mainWindow.StartBackgroundUpdateChecks(checkNow: true);
 
             TimeSpan remainingSplashTime = MinimumSplashDuration - splashStopwatch.Elapsed;
             if (remainingSplashTime > TimeSpan.Zero) {

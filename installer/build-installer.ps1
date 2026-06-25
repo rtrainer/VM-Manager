@@ -43,7 +43,8 @@ if (-not $SkipPublish) {
         "--output", $publishDir,
         "-p:SelfContained=$SelfContained",
         "-p:PublishSingleFile=false",
-        "-p:VelopackUpdateUrl=$UpdateUrl"
+        "-p:VelopackUpdateUrl=$UpdateUrl",
+        "-maxcpucount:1"
     )
 
     & dotnet @publishArgs
