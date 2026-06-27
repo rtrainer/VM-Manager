@@ -17,6 +17,7 @@ namespace VmManager.App;
 
 public partial class MainWindow : Window {
     private static readonly TimeSpan UpdateCheckInterval = TimeSpan.FromHours(1);
+    private static readonly TimeSpan VmRefreshInterval = TimeSpan.FromSeconds(5);
     private readonly IHyperVService _hyperVService;
     private readonly VmGroupCatalog _groupCatalog;
     private readonly IAppSettingsRepository _settingsRepository;
@@ -30,6 +31,7 @@ public partial class MainWindow : Window {
     private string? _lastNotifiedUpdateKey;
     private SettingsWindow? _settingsWindow;
     private bool _allowClose;
+    private bool _refreshInProgress;
     private bool _updateCheckInProgress;
     private readonly HashSet<Guid> _powerOperationVmIds = [];
     private readonly Dictionary<Guid, VirtualMachineState> _dashboardStateOverrides = [];
@@ -49,7 +51,7 @@ public partial class MainWindow : Window {
         InitializeComponent();
         RebuildGroupSelectors();
 
-        _refreshTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(5) };
+        _refreshTimer = new DispatcherTimer { Interval = VmRefreshInterval };
         _refreshTimer.Tick += async (_, _) => await RefreshAsync(silent: true);
         _refreshTimer.Start();
 
@@ -128,17 +130,34 @@ public partial class MainWindow : Window {
     }
 
     public async Task RefreshAsync(bool silent = false) {
+        if (_refreshInProgress) {
+            if (!silent) {
+                SetStatus("A virtual machine refresh is already in progress.");
+            }
+
+            return;
+        }
+
+        _refreshInProgress = true;
         try {
             if (!silent) {
                 SetStatus("Refreshing virtual machines...");
             }
 
-            _virtualMachines = await _hyperVService.GetVirtualMachinesAsync();
+            IReadOnlyList<VirtualMachine> refreshedVirtualMachines = await _hyperVService.GetVirtualMachinesAsync();
+            bool hasChanges = !VmSnapshotsEqual(_virtualMachines, refreshedVirtualMachines);
+
+            _virtualMachines = refreshedVirtualMachines;
             ApplyGroupFilter();
             SetStatus($"{_virtualMachines.Count} virtual machine(s) found. Last refreshed {DateTime.Now:t}.");
-            DataChanged?.Invoke(this, EventArgs.Empty);
+
+            if (hasChanges || !silent) {
+                DataChanged?.Invoke(this, EventArgs.Empty);
+            }
         } catch (Exception exception) {
             SetStatus($"Unable to query Hyper-V: {exception.Message}");
+        } finally {
+            _refreshInProgress = false;
         }
     }
 
@@ -505,6 +524,10 @@ public partial class MainWindow : Window {
         _dashboardStateOverrides.TryGetValue(vm.Id, out VirtualMachineState state)
             ? state
             : vm.State;
+
+    private static bool VmSnapshotsEqual(IReadOnlyList<VirtualMachine> left, IReadOnlyList<VirtualMachine> right) =>
+        left.Count == right.Count
+        && left.Zip(right).All(pair => pair.First == pair.Second);
 
     private static string CapitalizeFirst(string value) =>
         string.IsNullOrEmpty(value) ? value : $"{char.ToUpperInvariant(value[0])}{value[1..]}";
