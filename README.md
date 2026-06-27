@@ -2,7 +2,7 @@
 
 VM Manager is a Windows system-tray application for managing local Hyper-V virtual machines.
 
-Current release: **0.2.13**
+Current release: **0.2.14**
 
 ## MVP features
 
@@ -10,7 +10,7 @@ Current release: **0.2.13**
 - Monitors VM status automatically every five seconds and updates the dashboard and tray when state changes.
 - Starts, gracefully shuts down, and force turns off one or more selected VMs concurrently.
 - Allows additional VM power actions while other VM power actions are still running.
-- Shows VMs as starting in the dashboard while startup operations are running.
+- Shows VMs as starting, shutting down, or turning off in the dashboard while power operations are running.
 - Shows a system tray popup when VM startup, shutdown, or turn-off operations finish.
 - Shows only valid actions for the selected VM state.
 - Provides VM actions from the dashboard, dashboard right-click menu, and system tray.
@@ -34,7 +34,7 @@ Current release: **0.2.13**
 
 - Windows with Hyper-V enabled.
 - A user account with permission to manage Hyper-V.
-- The Windows Hyper-V PowerShell module.
+- The Windows Hyper-V WMI/CIM provider.
 - .NET 10 SDK to build from source.
 
 ## Run
@@ -103,4 +103,4 @@ https://github.com/<owner>/<repo>/releases/latest/download
 
 You can also run the workflow manually from the GitHub Actions tab.
 
-The MVP uses the installed Hyper-V PowerShell module behind `IHyperVService`. The adapter targets VMs by their stable Hyper-V ID, including machines with duplicate names.
+The MVP uses the Hyper-V WMI/CIM provider behind `IHyperVService`. The adapter targets VMs by their stable Hyper-V ID, including machines with duplicate names.
