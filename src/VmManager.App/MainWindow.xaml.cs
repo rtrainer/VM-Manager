@@ -32,6 +32,7 @@ public partial class MainWindow : Window {
     private bool _allowClose;
     private bool _updateCheckInProgress;
     private readonly HashSet<Guid> _powerOperationVmIds = [];
+    private readonly Dictionary<Guid, VirtualMachineState> _dashboardStateOverrides = [];
 
     public MainWindow(
         IHyperVService hyperVService,
@@ -59,6 +60,8 @@ public partial class MainWindow : Window {
     public event EventHandler? DataChanged;
 
     public event EventHandler<UpdateAvailableEventArgs>? UpdateAvailable;
+
+    public event EventHandler<VmPowerOperationFinishedEventArgs>? VmPowerOperationFinished;
 
     public IReadOnlyList<VirtualMachine> VirtualMachines => _virtualMachines;
 
@@ -146,6 +149,7 @@ public partial class MainWindow : Window {
             "Starting {0} virtual machine(s)...",
             "started",
             "Unable to start virtual machine",
+            VmPowerOperationKind.Start,
             CanStart,
             _hyperVService.StartAsync);
 
@@ -156,6 +160,7 @@ public partial class MainWindow : Window {
             "Shutting down {0} virtual machine(s)...",
             "shut down",
             "Unable to shut down virtual machine",
+            VmPowerOperationKind.ShutDown,
             CanStop,
             _hyperVService.ShutDownAsync);
 
@@ -172,6 +177,7 @@ public partial class MainWindow : Window {
             "Starting {0} virtual machine(s)...",
             "started",
             "Unable to start virtual machine",
+            VmPowerOperationKind.Start,
             CanStart,
             _hyperVService.StartAsync);
     }
@@ -189,6 +195,7 @@ public partial class MainWindow : Window {
             "Shutting down {0} virtual machine(s)...",
             "shut down",
             "Unable to shut down virtual machine",
+            VmPowerOperationKind.ShutDown,
             CanStop,
             _hyperVService.ShutDownAsync);
     }
@@ -397,7 +404,8 @@ public partial class MainWindow : Window {
                 vm,
                 string.Join(", ", _groupCatalog.Groups
                     .Where(group => group.VmIds.Contains(vm.Id))
-                    .Select(group => group.Name))))
+                    .Select(group => group.Name)),
+                GetDashboardState(vm)))
             .ToList();
 
         VmGrid.ItemsSource = rows;
@@ -414,6 +422,7 @@ public partial class MainWindow : Window {
         string pluralStatusFormat,
         string completedVerb,
         string failureTitle,
+        VmPowerOperationKind operationKind,
         Func<VirtualMachine, bool> predicate,
         Func<Guid, CancellationToken, Task> operation) {
         IReadOnlyList<VirtualMachine> targets = vmIds
@@ -433,8 +442,14 @@ public partial class MainWindow : Window {
             _powerOperationVmIds.Add(vm.Id);
         }
 
+        if (operationKind == VmPowerOperationKind.Start) {
+            foreach (VirtualMachine vm in targets) {
+                _dashboardStateOverrides[vm.Id] = VirtualMachineState.Starting;
+            }
+        }
+
         SetStatus(targets.Count == 1 ? singularStatus : string.Format(pluralStatusFormat, targets.Count));
-        UpdateActionButtons();
+        ApplyGroupFilter();
 
         VmPowerOperationResult[] results = await Task.WhenAll(targets.Select(vm =>
             RunTrackedVmPowerOperationAsync(vm, operation)));
@@ -453,7 +468,19 @@ public partial class MainWindow : Window {
             MessageDialog.Show(this, errorMessage, failureTitle, MessageBoxButton.OK, MessageBoxImage.Error);
         }
 
+        VmPowerOperationFinished?.Invoke(this, new VmPowerOperationFinishedEventArgs(
+            operationKind,
+            targets.Select(vm => vm.Name).ToList(),
+            targets.Count,
+            succeededCount,
+            failures.Count));
+
         await RefreshAsync(silent: true);
+        foreach (VirtualMachine vm in targets) {
+            _dashboardStateOverrides.Remove(vm.Id);
+        }
+
+        ApplyGroupFilter();
         UpdateActionButtons();
     }
 
@@ -473,6 +500,11 @@ public partial class MainWindow : Window {
     }
 
     private void SetStatus(string message) => StatusTextBlock.Text = message.ReplaceLineEndings(" ");
+
+    private VirtualMachineState GetDashboardState(VirtualMachine vm) =>
+        _dashboardStateOverrides.TryGetValue(vm.Id, out VirtualMachineState state)
+            ? state
+            : vm.State;
 
     private static string CapitalizeFirst(string value) =>
         string.IsNullOrEmpty(value) ? value : $"{char.ToUpperInvariant(value[0])}{value[1..]}";
@@ -759,6 +791,7 @@ public partial class MainWindow : Window {
             "Starting {0} virtual machine(s)...",
             "started",
             "Unable to start virtual machine",
+            VmPowerOperationKind.Start,
             CanStart,
             _hyperVService.StartAsync);
 
@@ -769,6 +802,7 @@ public partial class MainWindow : Window {
             "Shutting down {0} virtual machine(s)...",
             "shut down",
             "Unable to shut down virtual machine",
+            VmPowerOperationKind.ShutDown,
             CanStop,
             _hyperVService.ShutDownAsync);
 
@@ -795,6 +829,7 @@ public partial class MainWindow : Window {
             "Turning off {0} virtual machine(s)...",
             "turned off",
             "Unable to turn off virtual machine",
+            VmPowerOperationKind.TurnOff,
             CanStop,
             _hyperVService.TurnOffAsync);
     }
@@ -905,9 +940,8 @@ public partial class MainWindow : Window {
 
     private sealed record VmPowerOperationResult(VirtualMachine VirtualMachine, Exception? Exception);
 
-    private sealed record VmListRow(VirtualMachine VirtualMachine, string GroupsDisplay) {
+    private sealed record VmListRow(VirtualMachine VirtualMachine, string GroupsDisplay, VirtualMachineState State) {
         public string Name => VirtualMachine.Name;
-        public VirtualMachineState State => VirtualMachine.State;
         public bool IsRunning => State == VirtualMachineState.Running;
         public string CpuDisplay => $"{VirtualMachine.CpuUsage}%";
         public string MemoryDisplay => $"{VirtualMachine.MemoryAssignedBytes / 1024d / 1024d:N0} MB";
@@ -922,8 +956,33 @@ public sealed class UpdateAvailableEventArgs(string version, UpdateNotificationK
     public bool IsReadyToInstall => Kind == UpdateNotificationKind.ReadyToInstall;
 }
 
+public sealed class VmPowerOperationFinishedEventArgs(
+    VmPowerOperationKind kind,
+    IReadOnlyList<string> vmNames,
+    int totalCount,
+    int succeededCount,
+    int failedCount) : EventArgs {
+    public VmPowerOperationKind Kind { get; } = kind;
+
+    public IReadOnlyList<string> VmNames { get; } = vmNames;
+
+    public int TotalCount { get; } = totalCount;
+
+    public int SucceededCount { get; } = succeededCount;
+
+    public int FailedCount { get; } = failedCount;
+
+    public bool HasFailures => FailedCount > 0;
+}
+
 public enum UpdateNotificationKind {
     Available,
     Installing,
     ReadyToInstall
+}
+
+public enum VmPowerOperationKind {
+    Start,
+    ShutDown,
+    TurnOff
 }
