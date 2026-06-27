@@ -34,7 +34,7 @@ public partial class MainWindow : Window {
     private bool _refreshInProgress;
     private bool _updateCheckInProgress;
     private readonly HashSet<Guid> _powerOperationVmIds = [];
-    private readonly Dictionary<Guid, VirtualMachineState> _dashboardStateOverrides = [];
+    private readonly Dictionary<Guid, VmDashboardState> _dashboardStateOverrides = [];
 
     public MainWindow(
         IHyperVService hyperVService,
@@ -419,12 +419,16 @@ public partial class MainWindow : Window {
                 .ToList();
 
         IReadOnlyList<VmListRow> rows = visibleVms
-            .Select(vm => new VmListRow(
-                vm,
-                string.Join(", ", _groupCatalog.Groups
-                    .Where(group => group.VmIds.Contains(vm.Id))
-                    .Select(group => group.Name)),
-                GetDashboardState(vm)))
+            .Select(vm => {
+                VmDashboardState dashboardState = GetDashboardState(vm);
+                return new VmListRow(
+                    vm,
+                    string.Join(", ", _groupCatalog.Groups
+                        .Where(group => group.VmIds.Contains(vm.Id))
+                        .Select(group => group.Name)),
+                    dashboardState.State,
+                    dashboardState.Display);
+            })
             .ToList();
 
         VmGrid.ItemsSource = rows;
@@ -461,10 +465,9 @@ public partial class MainWindow : Window {
             _powerOperationVmIds.Add(vm.Id);
         }
 
-        if (operationKind == VmPowerOperationKind.Start) {
-            foreach (VirtualMachine vm in targets) {
-                _dashboardStateOverrides[vm.Id] = VirtualMachineState.Starting;
-            }
+        VmDashboardState dashboardStateOverride = GetPowerOperationDashboardState(operationKind);
+        foreach (VirtualMachine vm in targets) {
+            _dashboardStateOverrides[vm.Id] = dashboardStateOverride;
         }
 
         SetStatus(targets.Count == 1 ? singularStatus : string.Format(pluralStatusFormat, targets.Count));
@@ -520,10 +523,18 @@ public partial class MainWindow : Window {
 
     private void SetStatus(string message) => StatusTextBlock.Text = message.ReplaceLineEndings(" ");
 
-    private VirtualMachineState GetDashboardState(VirtualMachine vm) =>
-        _dashboardStateOverrides.TryGetValue(vm.Id, out VirtualMachineState state)
+    private VmDashboardState GetDashboardState(VirtualMachine vm) =>
+        _dashboardStateOverrides.TryGetValue(vm.Id, out VmDashboardState state)
             ? state
-            : vm.State;
+            : new VmDashboardState(vm.State, vm.State.ToString());
+
+    private static VmDashboardState GetPowerOperationDashboardState(VmPowerOperationKind operationKind) =>
+        operationKind switch {
+            VmPowerOperationKind.Start => new VmDashboardState(VirtualMachineState.Starting, "Starting"),
+            VmPowerOperationKind.ShutDown => new VmDashboardState(VirtualMachineState.Stopping, "Shutting down"),
+            VmPowerOperationKind.TurnOff => new VmDashboardState(VirtualMachineState.Stopping, "Turning off"),
+            _ => new VmDashboardState(VirtualMachineState.Other, "Working")
+        };
 
     private static bool VmSnapshotsEqual(IReadOnlyList<VirtualMachine> left, IReadOnlyList<VirtualMachine> right) =>
         left.Count == right.Count
@@ -963,7 +974,13 @@ public partial class MainWindow : Window {
 
     private sealed record VmPowerOperationResult(VirtualMachine VirtualMachine, Exception? Exception);
 
-    private sealed record VmListRow(VirtualMachine VirtualMachine, string GroupsDisplay, VirtualMachineState State) {
+    private readonly record struct VmDashboardState(VirtualMachineState State, string Display);
+
+    private sealed record VmListRow(
+        VirtualMachine VirtualMachine,
+        string GroupsDisplay,
+        VirtualMachineState State,
+        string StateDisplay) {
         public string Name => VirtualMachine.Name;
         public bool IsRunning => State == VirtualMachineState.Running;
         public string CpuDisplay => $"{VirtualMachine.CpuUsage}%";

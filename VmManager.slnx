@@ -6,5 +6,6 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/VmManager.Core.Tests/VmManager.Core.Tests.csproj" />
+    <Project Path="tests/VmManager.HyperV.Tests/VmManager.HyperV.Tests.csproj" />
   </Folder>
 </Solution>

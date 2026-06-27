@@ -69,7 +69,7 @@ public partial class App : System.Windows.Application {
             }
 
             _splashWindow.SetStatus("Preparing the system tray...");
-            var mainWindow = new MainWindow(new PowerShellHyperVService(), catalog, settingsRepository, loginStartupService, settings);
+            var mainWindow = new MainWindow(new WmiHyperVService(), catalog, settingsRepository, loginStartupService, settings);
             MainWindow = mainWindow;
             _trayIcon = new TrayIconService(mainWindow);
 
