@@ -2,23 +2,22 @@
 
 VM Manager is a Windows system-tray application for managing local Hyper-V virtual machines.
 
-Current release: **0.2.10**
+Current release: **0.2.11-dev**
 
 ## MVP features
 
 - Lists local Hyper-V VMs with state, CPU usage, and assigned memory.
 - Refreshes VM status automatically every five seconds and on demand.
-- Starts one or more selected VMs concurrently, including from the dashboard right-click menu.
-- Allows additional VMs to be started while other start operations are still running.
-- Gracefully shuts down and force turns off individual VMs.
+- Starts, gracefully shuts down, and force turns off one or more selected VMs concurrently.
+- Allows additional VM power actions while other VM power actions are still running.
 - Shows only valid actions for the selected VM state.
 - Provides VM actions from the dashboard, dashboard right-click menu, and system tray.
 - Creates custom groups and assigns one or more VMs to groups.
-- Starts or shuts down every applicable VM in a group.
+- Starts or shuts down every applicable VM in a group concurrently.
 - Exposes VM group actions from the dashboard and system tray.
 - Highlights running VMs with a pale green dashboard row background.
 - Displays running VMs in bold green text in the system tray menu.
-- Uses a centered confirmation dialog before forcefully turning off a VM.
+- Uses a centered confirmation dialog before forcefully turning off one or more VMs.
 - Hides the dashboard to the system tray when the window is closed.
 - Reopens the dashboard by double-clicking the system tray icon.
 - Shows startup progress while loading settings and discovering local Hyper-V VMs.

@@ -30,9 +30,8 @@ public partial class MainWindow : Window {
     private string? _lastNotifiedUpdateKey;
     private SettingsWindow? _settingsWindow;
     private bool _allowClose;
-    private bool _operationInProgress;
     private bool _updateCheckInProgress;
-    private readonly HashSet<Guid> _startingVmIds = [];
+    private readonly HashSet<Guid> _powerOperationVmIds = [];
 
     public MainWindow(
         IHyperVService hyperVService,
@@ -126,10 +125,6 @@ public partial class MainWindow : Window {
     }
 
     public async Task RefreshAsync(bool silent = false) {
-        if (_operationInProgress) {
-            return;
-        }
-
         try {
             if (!silent) {
                 SetStatus("Refreshing virtual machines...");
@@ -145,10 +140,24 @@ public partial class MainWindow : Window {
     }
 
     public Task StartVmAsync(Guid vmId) =>
-        StartVmsAsync([vmId], "Starting virtual machine...");
+        RunVmPowerOperationsAsync(
+            [vmId],
+            "Starting virtual machine...",
+            "Starting {0} virtual machine(s)...",
+            "started",
+            "Unable to start virtual machine",
+            CanStart,
+            _hyperVService.StartAsync);
 
     public Task ShutDownVmAsync(Guid vmId) =>
-        RunOperationAsync("Shutting down virtual machine...", () => _hyperVService.ShutDownAsync(vmId));
+        RunVmPowerOperationsAsync(
+            [vmId],
+            "Shutting down virtual machine...",
+            "Shutting down {0} virtual machine(s)...",
+            "shut down",
+            "Unable to shut down virtual machine",
+            CanStop,
+            _hyperVService.ShutDownAsync);
 
     public Task StartGroupAsync(Guid groupId) {
         VmGroup group = _groupCatalog.Groups.First(group => group.Id == groupId);
@@ -157,11 +166,32 @@ public partial class MainWindow : Window {
             .Select(vm => vm.Id)
             .ToList();
 
-        return StartVmsAsync(targets, "Starting group...");
+        return RunVmPowerOperationsAsync(
+            targets,
+            "Starting virtual machine...",
+            "Starting {0} virtual machine(s)...",
+            "started",
+            "Unable to start virtual machine",
+            CanStart,
+            _hyperVService.StartAsync);
     }
 
-    public Task ShutDownGroupAsync(Guid groupId) =>
-        RunGroupOperationAsync(groupId, "Shutting down group...", CanStop, _hyperVService.ShutDownAsync);
+    public Task ShutDownGroupAsync(Guid groupId) {
+        VmGroup group = _groupCatalog.Groups.First(group => group.Id == groupId);
+        IReadOnlyList<Guid> targets = _virtualMachines
+            .Where(vm => group.VmIds.Contains(vm.Id) && CanStop(vm))
+            .Select(vm => vm.Id)
+            .ToList();
+
+        return RunVmPowerOperationsAsync(
+            targets,
+            "Shutting down virtual machine...",
+            "Shutting down {0} virtual machine(s)...",
+            "shut down",
+            "Unable to shut down virtual machine",
+            CanStop,
+            _hyperVService.ShutDownAsync);
+    }
 
     public async Task SetStartMinimizedAsync(bool startMinimized) {
         if (_settings.StartMinimized == startMinimized) {
@@ -325,13 +355,6 @@ public partial class MainWindow : Window {
 
     private IReadOnlyList<VmListRow> SelectedVms => VmGrid.SelectedItems.Cast<VmListRow>().ToList();
 
-    private VmListRow? SingleSelectedVm {
-        get {
-            IReadOnlyList<VmListRow> selectedVms = SelectedVms;
-            return selectedVms.Count == 1 ? selectedVms[0] : null;
-        }
-    }
-
     private GroupOption? SelectedFilter => GroupFilterComboBox.SelectedItem as GroupOption;
 
     private VmGroup? SelectedFilterGroup =>
@@ -385,134 +408,101 @@ public partial class MainWindow : Window {
         UpdateActionButtons();
     }
 
-    private async Task StartVmsAsync(IEnumerable<Guid> vmIds, string status) {
-        if (_operationInProgress) {
-            return;
-        }
-
+    private async Task RunVmPowerOperationsAsync(
+        IEnumerable<Guid> vmIds,
+        string singularStatus,
+        string pluralStatusFormat,
+        string completedVerb,
+        string failureTitle,
+        Func<VirtualMachine, bool> predicate,
+        Func<Guid, CancellationToken, Task> operation) {
         IReadOnlyList<VirtualMachine> targets = vmIds
             .Distinct()
             .Select(id => _virtualMachines.FirstOrDefault(vm => vm.Id == id))
-            .Where(vm => vm is not null && CanStart(vm))
+            .Where(vm => vm is not null && predicate(vm))
             .Select(vm => vm!)
             .ToList();
 
         if (targets.Count == 0) {
-            SetStatus("No virtual machines can be started.");
+            SetStatus($"No virtual machines can be {completedVerb}.");
             UpdateActionButtons();
             return;
         }
 
         foreach (VirtualMachine vm in targets) {
-            _startingVmIds.Add(vm.Id);
+            _powerOperationVmIds.Add(vm.Id);
         }
 
-        SetStatus(targets.Count == 1 ? status : $"Starting {targets.Count} virtual machine(s)...");
+        SetStatus(targets.Count == 1 ? singularStatus : string.Format(pluralStatusFormat, targets.Count));
         UpdateActionButtons();
 
-        StartVmResult[] results = await Task.WhenAll(targets.Select(StartTrackedVmAsync));
-        int startedCount = results.Count(result => result.Exception is null);
-        IReadOnlyList<StartVmResult> failures = results.Where(result => result.Exception is not null).ToList();
+        VmPowerOperationResult[] results = await Task.WhenAll(targets.Select(vm =>
+            RunTrackedVmPowerOperationAsync(vm, operation)));
+        int succeededCount = results.Count(result => result.Exception is null);
+        IReadOnlyList<VmPowerOperationResult> failures = results.Where(result => result.Exception is not null).ToList();
+        string completedMessage = $"{CapitalizeFirst(completedVerb)} {succeededCount} virtual machine(s).";
 
         if (failures.Count == 0) {
-            SetStatus(_startingVmIds.Count == 0
-                ? $"Started {startedCount} virtual machine(s)."
-                : $"Started {startedCount} virtual machine(s). {_startingVmIds.Count} start operation(s) still running.");
+            SetStatus(_powerOperationVmIds.Count == 0
+                ? completedMessage
+                : $"{completedMessage} {_powerOperationVmIds.Count} power operation(s) still running.");
         } else {
-            SetStatus($"Started {startedCount} virtual machine(s); {failures.Count} failed.");
+            SetStatus($"{completedMessage} {failures.Count} failed.");
             string errorMessage = string.Join(Environment.NewLine, failures.Select(result =>
                 $"{result.VirtualMachine.Name}: {result.Exception!.Message}"));
-            MessageDialog.Show(this, errorMessage, "Unable to start virtual machine", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageDialog.Show(this, errorMessage, failureTitle, MessageBoxButton.OK, MessageBoxImage.Error);
         }
 
         await RefreshAsync(silent: true);
         UpdateActionButtons();
     }
 
-    private async Task<StartVmResult> StartTrackedVmAsync(VirtualMachine vm) {
+    private async Task<VmPowerOperationResult> RunTrackedVmPowerOperationAsync(
+        VirtualMachine vm,
+        Func<Guid, CancellationToken, Task> operation) {
         try {
-            await _hyperVService.StartAsync(vm.Id);
-            return new StartVmResult(vm, null);
+            await operation(vm.Id, CancellationToken.None);
+            return new VmPowerOperationResult(vm, null);
         } catch (Exception exception) {
             AppLog.Write(exception);
-            return new StartVmResult(vm, exception);
+            return new VmPowerOperationResult(vm, exception);
         } finally {
-            _startingVmIds.Remove(vm.Id);
+            _powerOperationVmIds.Remove(vm.Id);
             UpdateActionButtons();
         }
     }
 
-    private async Task RunOperationAsync(string status, Func<Task> operation) {
-        if (_operationInProgress) {
-            return;
-        }
-
-        _operationInProgress = true;
-        SetStatus(status);
-        UpdateActionButtons();
-        try {
-            await operation();
-            SetStatus("Operation completed.");
-        } catch (Exception exception) {
-            SetStatus($"Operation failed: {exception.Message}");
-            MessageDialog.Show(this, exception.Message, "VM Manager", MessageBoxButton.OK, MessageBoxImage.Error);
-        } finally {
-            _operationInProgress = false;
-            await RefreshAsync(silent: true);
-        }
-    }
-
-    private Task RunGroupOperationAsync(
-        Guid groupId,
-        string status,
-        Func<VirtualMachine, bool> predicate,
-        Func<Guid, CancellationToken, Task> operation) {
-        VmGroup group = _groupCatalog.Groups.First(group => group.Id == groupId);
-        var targets = _virtualMachines.Where(vm => group.VmIds.Contains(vm.Id) && predicate(vm)).ToList();
-        return RunOperationAsync(status, async () => {
-            foreach (VirtualMachine? vm in targets) {
-                await operation(vm.Id, CancellationToken.None);
-            }
-        });
-    }
-
     private void SetStatus(string message) => StatusTextBlock.Text = message.ReplaceLineEndings(" ");
 
-    private bool CanStart(VirtualMachine vm) => vm.CanStart && !_startingVmIds.Contains(vm.Id);
+    private static string CapitalizeFirst(string value) =>
+        string.IsNullOrEmpty(value) ? value : $"{char.ToUpperInvariant(value[0])}{value[1..]}";
 
-    private bool CanStop(VirtualMachine vm) => vm.CanStop && !_startingVmIds.Contains(vm.Id);
+    private bool CanStart(VirtualMachine vm) => vm.CanStart && !_powerOperationVmIds.Contains(vm.Id);
+
+    private bool CanStop(VirtualMachine vm) => vm.CanStop && !_powerOperationVmIds.Contains(vm.Id);
 
     private void UpdateActionButtons() {
         VmGroup? filterGroup = SelectedFilterGroup;
         bool groupSelected = filterGroup is not null;
-        DeleteGroupButton.IsEnabled = groupSelected && !_operationInProgress;
+        DeleteGroupButton.IsEnabled = groupSelected;
         StartGroupButton.IsEnabled = filterGroup is not null
-            && _virtualMachines.Any(vm => filterGroup.VmIds.Contains(vm.Id) && CanStart(vm))
-            && !_operationInProgress;
+            && _virtualMachines.Any(vm => filterGroup.VmIds.Contains(vm.Id) && CanStart(vm));
         ShutDownGroupButton.IsEnabled = filterGroup is not null
-            && _virtualMachines.Any(vm => filterGroup.VmIds.Contains(vm.Id) && CanStop(vm))
-            && !_operationInProgress;
+            && _virtualMachines.Any(vm => filterGroup.VmIds.Contains(vm.Id) && CanStop(vm));
 
         IReadOnlyList<VmListRow> selectedVms = SelectedVms;
-        VmListRow? singleSelectedVm = selectedVms.Count == 1 ? selectedVms[0] : null;
-        StartVmButton.IsEnabled = selectedVms.Any(row => CanStart(row.VirtualMachine)) && !_operationInProgress;
-        ShutDownVmButton.IsEnabled = singleSelectedVm is not null
-            && CanStop(singleSelectedVm.VirtualMachine)
-            && !_operationInProgress;
-        TurnOffVmButton.IsEnabled = singleSelectedVm is not null
-            && CanStop(singleSelectedVm.VirtualMachine)
-            && !_operationInProgress;
+        StartVmButton.IsEnabled = selectedVms.Any(row => CanStart(row.VirtualMachine));
+        ShutDownVmButton.IsEnabled = selectedVms.Any(row => CanStop(row.VirtualMachine));
+        TurnOffVmButton.IsEnabled = selectedVms.Any(row => CanStop(row.VirtualMachine));
         VmGroup? membershipGroup = SelectedMembershipGroup;
         bool anySelectedVmIsGroupMember = selectedVms.Any(row =>
             membershipGroup?.VmIds.Contains(row.VirtualMachine.Id) == true);
         bool anySelectedVmCanBeAdded = selectedVms.Any(row =>
             membershipGroup?.VmIds.Contains(row.VirtualMachine.Id) == false);
         AddToGroupButton.IsEnabled = membershipGroup is not null
-            && (selectedVms.Count == 0 || anySelectedVmCanBeAdded)
-            && !_operationInProgress;
+            && (selectedVms.Count == 0 || anySelectedVmCanBeAdded);
         RemoveFromGroupButton.IsEnabled = selectedVms.Count > 0
-            && anySelectedVmIsGroupMember
-            && !_operationInProgress;
+            && anySelectedVmIsGroupMember;
     }
 
     private async void RefreshButton_Click(object sender, RoutedEventArgs e) => await RefreshAsync();
@@ -565,20 +555,15 @@ public partial class MainWindow : Window {
 
     private void VmContextMenu_Opened(object sender, RoutedEventArgs e) {
         IReadOnlyList<VmListRow> selectedVms = SelectedVms;
-        VmListRow? singleSelectedVm = selectedVms.Count == 1 ? selectedVms[0] : null;
-        ContextStartVmMenuItem.IsEnabled = selectedVms.Any(row => CanStart(row.VirtualMachine)) && !_operationInProgress;
-        ContextShutDownVmMenuItem.IsEnabled = singleSelectedVm is not null
-            && CanStop(singleSelectedVm.VirtualMachine)
-            && !_operationInProgress;
-        ContextTurnOffVmMenuItem.IsEnabled = singleSelectedVm is not null
-            && CanStop(singleSelectedVm.VirtualMachine)
-            && !_operationInProgress;
+        ContextStartVmMenuItem.IsEnabled = selectedVms.Any(row => CanStart(row.VirtualMachine));
+        ContextShutDownVmMenuItem.IsEnabled = selectedVms.Any(row => CanStop(row.VirtualMachine));
+        ContextTurnOffVmMenuItem.IsEnabled = selectedVms.Any(row => CanStop(row.VirtualMachine));
         RebuildContextAddToGroupMenu(selectedVms);
     }
 
     private void RebuildContextAddToGroupMenu(IReadOnlyList<VmListRow> selectedVms) {
         ContextAddToGroupMenuItem.Items.Clear();
-        if (selectedVms.Count == 0 || _operationInProgress) {
+        if (selectedVms.Count == 0) {
             ContextAddToGroupMenuItem.IsEnabled = false;
             return;
         }
@@ -610,13 +595,11 @@ public partial class MainWindow : Window {
     }
 
     private async void ContextShutDownVmMenuItem_Click(object sender, RoutedEventArgs e) {
-        if (SingleSelectedVm is not null) {
-            await ShutDownVmAsync(SingleSelectedVm.VirtualMachine.Id);
-        }
+        await ShutDownSelectedVmsAsync();
     }
 
     private async void ContextTurnOffVmMenuItem_Click(object sender, RoutedEventArgs e) =>
-        await TurnOffSelectedVmAsync();
+        await TurnOffSelectedVmsAsync();
 
     private async void ContextAddToGroupMenuItem_Click(object sender, RoutedEventArgs e) {
         IReadOnlyList<VmListRow> selectedVms = SelectedVms;
@@ -762,31 +745,58 @@ public partial class MainWindow : Window {
     }
 
     private async void ShutDownVmButton_Click(object sender, RoutedEventArgs e) {
-        if (SingleSelectedVm is not null) {
-            await ShutDownVmAsync(SingleSelectedVm.VirtualMachine.Id);
-        }
+        await ShutDownSelectedVmsAsync();
     }
 
     private async void TurnOffVmButton_Click(object sender, RoutedEventArgs e) {
-        await TurnOffSelectedVmAsync();
+        await TurnOffSelectedVmsAsync();
     }
 
     private Task StartSelectedVmsAsync() =>
-        StartVmsAsync(SelectedVms.Select(row => row.VirtualMachine.Id), "Starting virtual machine...");
+        RunVmPowerOperationsAsync(
+            SelectedVms.Select(row => row.VirtualMachine.Id),
+            "Starting virtual machine...",
+            "Starting {0} virtual machine(s)...",
+            "started",
+            "Unable to start virtual machine",
+            CanStart,
+            _hyperVService.StartAsync);
 
-    private async Task TurnOffSelectedVmAsync() {
-        VmListRow? selectedVm = SingleSelectedVm;
-        if (selectedVm is null) {
+    private Task ShutDownSelectedVmsAsync() =>
+        RunVmPowerOperationsAsync(
+            SelectedVms.Select(row => row.VirtualMachine.Id),
+            "Shutting down virtual machine...",
+            "Shutting down {0} virtual machine(s)...",
+            "shut down",
+            "Unable to shut down virtual machine",
+            CanStop,
+            _hyperVService.ShutDownAsync);
+
+    private async Task TurnOffSelectedVmsAsync() {
+        IReadOnlyList<VirtualMachine> targets = SelectedVms
+            .Select(row => row.VirtualMachine)
+            .Where(CanStop)
+            .ToList();
+        if (targets.Count == 0) {
             return;
         }
 
-        var confirmation = new TurnOffConfirmationDialog(selectedVm.Name) { Owner = this };
+        string targetName = targets.Count == 1
+            ? targets[0].Name
+            : $"{targets.Count} virtual machines";
+        var confirmation = new TurnOffConfirmationDialog(targetName, targets.Count > 1) { Owner = this };
         if (confirmation.ShowDialog() != true) {
             return;
         }
 
-        await RunOperationAsync("Turning off virtual machine...",
-            () => _hyperVService.TurnOffAsync(selectedVm.VirtualMachine.Id));
+        await RunVmPowerOperationsAsync(
+            targets.Select(vm => vm.Id),
+            "Turning off virtual machine...",
+            "Turning off {0} virtual machine(s)...",
+            "turned off",
+            "Unable to turn off virtual machine",
+            CanStop,
+            _hyperVService.TurnOffAsync);
     }
 
     private async void StartGroupButton_Click(object sender, RoutedEventArgs e) {
@@ -893,7 +903,7 @@ public partial class MainWindow : Window {
 
     private sealed record GroupOption(Guid? Id, string Name);
 
-    private sealed record StartVmResult(VirtualMachine VirtualMachine, Exception? Exception);
+    private sealed record VmPowerOperationResult(VirtualMachine VirtualMachine, Exception? Exception);
 
     private sealed record VmListRow(VirtualMachine VirtualMachine, string GroupsDisplay) {
         public string Name => VirtualMachine.Name;
