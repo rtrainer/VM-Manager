@@ -26,6 +26,7 @@ public sealed class TrayIconService : IDisposable {
         _notifyIcon.BalloonTipClicked += (_, _) => _mainWindow.ShowFromTray();
         _mainWindow.DataChanged += (_, _) => RebuildMenu();
         _mainWindow.UpdateAvailable += MainWindow_UpdateAvailable;
+        _mainWindow.VmPowerOperationFinished += MainWindow_VmPowerOperationFinished;
         RebuildMenu();
     }
 
@@ -57,6 +58,67 @@ public sealed class TrayIconService : IDisposable {
             "VM Manager update",
             $"{message} {instruction}",
             Forms.ToolTipIcon.Info);
+    }
+
+    private void MainWindow_VmPowerOperationFinished(object? sender, VmPowerOperationFinishedEventArgs e) {
+        string action = e.Kind switch {
+            VmPowerOperationKind.Start => "startup",
+            VmPowerOperationKind.ShutDown => "shutdown",
+            VmPowerOperationKind.TurnOff => "turn off",
+            _ => "power action"
+        };
+        string title = e.HasFailures
+            ? $"VM {action} completed with errors"
+            : $"VM {action} complete";
+        string message = e.TotalCount == 1
+            ? GetSingleVmPowerOperationMessage(e)
+            : GetMultipleVmPowerOperationMessage(e);
+
+        _notifyIcon.ShowBalloonTip(
+            6000,
+            title,
+            message,
+            e.HasFailures ? Forms.ToolTipIcon.Warning : Forms.ToolTipIcon.Info);
+    }
+
+    private static string GetSingleVmPowerOperationMessage(VmPowerOperationFinishedEventArgs e) {
+        string vmName = e.VmNames.FirstOrDefault() ?? "The virtual machine";
+        if (e.HasFailures) {
+            return $"{vmName} operation failed. Open VM Manager for details.";
+        }
+
+        return e.Kind switch {
+            VmPowerOperationKind.Start => $"{vmName} has started.",
+            VmPowerOperationKind.ShutDown => $"{vmName} has shut down.",
+            VmPowerOperationKind.TurnOff => $"{vmName} has been turned off.",
+            _ => $"{vmName} power operation is complete."
+        };
+    }
+
+    private static string GetMultipleVmPowerOperationMessage(VmPowerOperationFinishedEventArgs e) {
+        string vmNames = FormatVmNames(e.VmNames);
+        if (e.HasFailures) {
+            return $"{e.SucceededCount} of {e.TotalCount} operation(s) completed for {vmNames}. {e.FailedCount} failed.";
+        }
+
+        return e.Kind switch {
+            VmPowerOperationKind.Start => $"{vmNames} have started.",
+            VmPowerOperationKind.ShutDown => $"{vmNames} have shut down.",
+            VmPowerOperationKind.TurnOff => $"{vmNames} have been turned off.",
+            _ => $"{vmNames} power operation(s) completed."
+        };
+    }
+
+    private static string FormatVmNames(IReadOnlyList<string> vmNames) {
+        if (vmNames.Count == 0) {
+            return "selected virtual machines";
+        }
+
+        if (vmNames.Count <= 3) {
+            return string.Join(", ", vmNames);
+        }
+
+        return $"{string.Join(", ", vmNames.Take(3))}, and {vmNames.Count - 3} more";
     }
 
     private void RebuildMenu() {
